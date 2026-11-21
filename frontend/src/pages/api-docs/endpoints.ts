@@ -2980,6 +2980,15 @@ export const sections: readonly Section[] = [
       },
       {
         method: 'POST',
+        path: '/panel/api/korova/nodes/connect',
+        summary: 'Connect a node from the one-line key printed by korova.sh install node.',
+      },
+      {
+        method: 'GET',
+        path: '/panel/api/korova/nodes/install-command',
+        summary: 'The node install one-liner for this deployment.',
+      },      {
+        method: 'POST',
         path: '/panel/api/korova/cascades/:id/del',
         summary: 'Remove a cascade from the entry server and delete its exit client.',
       },

@@ -1,15 +1,19 @@
 import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router';
-import { Button, Input, Popconfirm, Select, Switch, Table } from 'antd';
+import { Alert, Button, Input, Popconfirm, Select, Switch, Table } from 'antd';
 import type { TableColumnsType } from 'antd';
 
 import KorovaPage, { Row, Section, Status } from '@/components/korova/KorovaPage';
+import { ClipboardManager } from '@/utils';
+import { getMessage } from '@/utils/messageBus';
 import {
   fmtDate,
   useCascades,
   useInboundOptions,
   useKorovaPost,
+  useNodeInstallCommand,
   type Cascade,
+  type ConnectNodeResult,
   type InboundOption,
 } from '@/components/korova/api';
 
@@ -25,32 +29,123 @@ const EXIT_PROTOCOLS = ['vless', 'vmess', 'trojan', 'shadowsocks'];
 const serverName = (ib?: InboundOption) => (ib ? ib.nodeName || 'Основной сервер' : '');
 const optionLabel = (ib: InboundOption) => `${serverName(ib)} — ${ib.remark || ib.tag} · ${ib.protocol}:${ib.port}`;
 
-const STEPS = [
-  {
-    title: 'Установи Korova на новый сервер',
-    text: (
-      <>
-        Загрузи архив и выполни <span className="k-mono">sudo bash deploy/korova/install.sh node</span>. Скрипт напечатает
-        адрес, путь и ключ.
-      </>
-    ),
-  },
-  {
-    title: 'Добавь его в «Узлы»',
-    text: 'Вставь адрес, порт 2053, путь и ключ. Режим TLS — pin, отпечаток подтянется кнопкой.',
-    to: '/nodes',
-  },
-  {
-    title: 'Создай подключение на узле',
-    text: 'Во «Входящих» выбери узел и создай, например, VLESS + Reality на 443.',
-    to: '/inbounds',
-  },
-  {
-    title: 'Отметь его для подписчиков',
-    text: 'В «Бот и доступ». Ключи у всех подписчиков появятся сами.',
-    to: '/korova/bot',
-  },
-];
+function ConnectServer() {
+  const navigate = useNavigate();
+  const { data: command } = useNodeInstallCommand();
+  const connect = useKorovaPost<{ key: string; name: string; force: boolean }, ConnectNodeResult>('/nodes/connect');
+  const [key, setKey] = useState('');
+  const [name, setName] = useState('');
+  const [result, setResult] = useState<ConnectNodeResult | null>(null);
+  const shownCommand =
+    command || 'bash <(curl -fsSL https://github.com/ТВОЙ_НИК/korova/releases/download/korova-latest/korova.sh) install node';
+
+  const run = (force: boolean) =>
+    connect.mutate(
+      { key, name, force },
+      {
+        onSuccess: (r) => {
+          setResult(r);
+          if (r.id > 0) {
+            setKey('');
+            setName('');
+          }
+        },
+        onError: () => setResult(null),
+      },
+    );
+
+  return (
+    <Section title="Подключить сервер" sub="Установи Korova на новый сервер и вставь сюда ключ, который он выведет." flush>
+      <Row label="1. Установка" hint="Выполни на новом сервере от root. Через минуту в конце появится ключ korova-node:…">
+        <div className="k-copy">
+          <span className="k-mono" title={shownCommand}>
+            {shownCommand}
+          </span>
+          <Button
+            size="small"
+            onClick={async () => {
+              await ClipboardManager.copyText(shownCommand);
+              getMessage().success('Команда скопирована');
+            }}
+          >
+            Копировать
+          </Button>
+        </div>
+      </Row>
+      <Row label="2. Ключ узла" hint="Потерял ключ — выполни на узле korova token, он выпустит новый.">
+        <Input.TextArea
+          value={key}
+          onChange={(e) => {
+            setKey(e.target.value);
+            setResult(null);
+          }}
+          placeholder="korova-node:eyJ2IjoxLC..."
+          autoSize={{ minRows: 2, maxRows: 4 }}
+          style={{ fontFamily: 'var(--k-mono)', fontSize: 12.5 }}
+          spellCheck={false}
+        />
+        <div style={{ display: 'flex', gap: 10, marginTop: 10, flexWrap: 'wrap' }}>
+          <Input
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="Название, например de-1 (необязательно)"
+            style={{ maxWidth: 300 }}
+          />
+          <Button type="primary" disabled={!key.trim()} loading={connect.isPending} onClick={() => run(false)}>
+            Подключить
+          </Button>
+        </div>
+        {result?.needConfirm && (
+          <Alert
+            type="warning"
+            showIcon
+            style={{ marginTop: 14 }}
+            title="Основной сервер не достучался до узла"
+            description={
+              <>
+                <div className="k-small" style={{ marginBottom: 8 }}>
+                  {result.probeError}. Обычно это файрвол в панели хостинга узла: открой там входящий TCP-порт панели узла
+                  (обычно 2053) и 443. Можно сохранить узел сейчас — он станет «онлайн», когда связь появится.
+                </div>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <Button size="small" onClick={() => run(true)} loading={connect.isPending}>
+                    Сохранить всё равно
+                  </Button>
+                  <Button size="small" type="text" onClick={() => setResult(null)}>
+                    Отмена
+                  </Button>
+                </div>
+              </>
+            }
+          />
+        )}
+        {result && result.id > 0 && (
+          <Alert
+            type="success"
+            showIcon
+            style={{ marginTop: 14 }}
+            title={`Сервер ${result.name} подключён${result.reachable ? '' : ', ждёт связи'}`}
+            description={
+              <>
+                <div className="k-small" style={{ marginBottom: 8 }}>
+                  Дальше создай на нём подключение во «Входящих» (выбери узел {result.name}) и отметь его в «Бот и доступ».
+                </div>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <Button size="small" onClick={() => navigate('/inbounds')}>
+                    Входящие
+                  </Button>
+                  <Button size="small" onClick={() => navigate('/korova/bot')}>
+                    Бот и доступ
+                  </Button>
+                </div>
+              </>
+            }
+          />
+        )}
+      </Row>
+    </Section>
+  );
+}
 
 export default function CascadesPage() {
   const navigate = useNavigate();
@@ -138,6 +233,8 @@ export default function CascadesPage() {
       actions={<Button onClick={() => navigate('/nodes')}>Узлы</Button>}
     >
       <div className="k-stack">
+        <ConnectServer />
+
         <Section title="Новый каскад" sub="Панель сама настроит исходящее подключение и маршрутизацию на входе." flush>
           <div style={{ padding: '20px 20px 0' }}>
             <div className="k-route" aria-hidden>
@@ -225,28 +322,6 @@ export default function CascadesPage() {
           />
         </Section>
 
-        <Section title="Как добавить сервер" flush>
-          <ol className="k-list">
-            {STEPS.map((s, i) => (
-              <li key={s.title} className="k-list-row">
-                <span className="k-setup-num" aria-hidden>
-                  {i + 1}
-                </span>
-                <span className="k-list-main">
-                  <b style={{ whiteSpace: 'normal' }}>{s.title}</b>
-                  <span>{s.text}</span>
-                </span>
-                {s.to ? (
-                  <Button size="small" onClick={() => navigate(s.to!)}>
-                    Открыть
-                  </Button>
-                ) : (
-                  <span />
-                )}
-              </li>
-            ))}
-          </ol>
-        </Section>
       </div>
     </KorovaPage>
   );

@@ -40,6 +40,8 @@ func NewKorovaController(g *gin.RouterGroup) *KorovaController {
 	g.GET("/cascades", a.cascades)
 	g.POST("/cascades", a.createCascade)
 	g.POST("/cascades/:id/del", a.deleteCascade)
+	g.POST("/nodes/connect", a.connectNode)
+	g.GET("/nodes/install-command", a.nodeInstallCommand)
 	return a
 }
 
@@ -210,4 +212,22 @@ func (a *KorovaController) createCascade(c *gin.Context) {
 
 func (a *KorovaController) deleteCascade(c *gin.Context) {
 	korovaReply(c, "Каскад удалён", nil, a.svc.DeleteCascade(idParam(c)))
+}
+
+func (a *KorovaController) connectNode(c *gin.Context) {
+	var req korova.ConnectNodeRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		korovaReply(c, "", nil, err)
+		return
+	}
+	res, err := a.svc.ConnectNode(req)
+	msg := ""
+	if err == nil && res.Id > 0 {
+		msg = "Узел подключён"
+	}
+	korovaReply(c, msg, res, err)
+}
+
+func (a *KorovaController) nodeInstallCommand(c *gin.Context) {
+	korovaReply(c, "", gin.H{"command": korova.NodeInstallCommand()}, nil)
 }

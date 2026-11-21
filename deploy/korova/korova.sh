@@ -3,7 +3,7 @@
 #   korova install          # main server: panel, bot, subscriptions
 #   korova install node     # extra server for VPN traffic
 #   korova update           # download the latest build and restart
-#   korova token            # new API key for a node
+#   korova token            # new one-line key to connect this node
 #   korova info             # panel address and login
 set -euo pipefail
 trap 'rc=$?; [ $rc -ne 0 ] && printf "\n\033[31m✗ Остановилось на строке %s (код %s). Пришли этот вывод.\033[0m\n" "$LINENO" "$rc" >&2' EXIT
@@ -98,6 +98,7 @@ ask_master() {
   setenv KOROVA_PANEL_DOMAIN "$panel"
   setenv KOROVA_SUB_DOMAIN "$sub"
   setenv KOROVA_ADMINS "$admins"
+  setenv KOROVA_REPO "$REPO"
 
   busy=$(ss -ltnpH '( sport = :80 or sport = :443 )' 2>/dev/null | grep -v caddy || true)
   if [ -n "$busy" ]; then
@@ -144,6 +145,8 @@ setup_caddy() {
   cat > /etc/caddy/Caddyfile <<EOF
 ${panel} {
 	encode gzip
+	@root path /
+	respond @root "Not found" 404
 	reverse_proxy 127.0.0.1:2053
 }
 
@@ -184,7 +187,20 @@ start() {
   ok "Панель запущена"
 }
 
-node_token() { xui setting -getApiToken -tokenName korova-master -tokenScope node-admin | grep apiToken || true; }
+# One line for the main panel: address, port, path, API key and certificate pin.
+node_key() {
+  local line tok port fp ip name base json
+  line=$(xui setting -getApiToken -tokenName korova-master -tokenScope node-admin 2>/dev/null | grep apiToken || true)
+  tok=$(echo "${line#*apiToken:}" | tr -d '[:space:]')
+  [ -n "$tok" ] || return 0
+  port=$(xui setting -show true 2>/dev/null | awk '$1=="port:" {print $2; exit}')
+  base=$(sed -n 's/^base=//p' "$CREDS" 2>/dev/null)
+  fp=$(openssl x509 -in /root/cert/node.crt -noout -fingerprint -sha256 2>/dev/null | cut -d= -f2 | tr -d ':')
+  ip=$(curl -fsS4 --max-time 5 https://ifconfig.me 2>/dev/null || hostname -I | awk '{print $1}')
+  name=$(hostname -s | tr -cd 'A-Za-z0-9-' | cut -c1-24)
+  json=$(printf '{"v":1,"n":"%s","a":"%s","p":%s,"b":"%s","t":"%s","f":"%s"}' "${name:-node}" "$ip" "${port:-2053}" "${base:-/}" "$tok" "$fp")
+  printf 'korova-node:%s' "$(printf '%s' "$json" | base64 | tr -d '\n')"
+}
 
 info() {
   [ -f "$CREDS" ] || die "Korova ещё не установлена."
@@ -200,13 +216,16 @@ info() {
     echo
     echo "  Порт 443 занят панелью и подписками: VPN на этом сервере ставь на 8443 или другой порт."
   else
-    say "Узел работает. В основной панели: Узлы → Добавить"
-    echo "  Адрес:        $ip"
-    echo "  Порт:         2053"
-    echo "  Схема:        https"
-    echo "  Путь:         $base"
-    echo "  Проверка TLS: pin (кнопка получения отпечатка)"
-    if [ -n "${1:-}" ]; then echo "  $1"; else echo "  API-ключ: выпусти командой korova token"; fi
+    say "Узел готов"
+    if [ -n "${1:-}" ]; then
+      echo "  Скопируй ключ целиком и вставь в основной панели: Серверы и каскады → Подключить сервер"
+      echo
+      printf '\033[1m%s\033[0m\n' "$1"
+      echo
+      echo "  Сохрани его. Новый ключ выпускает команда korova token, старый при этом перестаёт работать."
+    else
+      echo "  Ключ для основной панели: korova token"
+    fi
   fi
   echo
   echo "  Обновление: korova update"
@@ -225,12 +244,13 @@ case "$CMD" in
     first_credentials
     start
     tok=""
-    if [ "$ROLE" = node ] && [ "$fresh" = 1 ]; then tok=$(node_token); fi
+    if [ "$ROLE" = node ] && [ "$fresh" = 1 ]; then tok=$(node_key); fi
     info "$tok"
     ;;
   update)
     [ -f "$APP/x-ui" ] || die "Korova ещё не установлена: korova install"
     cp -a "$DB/x-ui.db" "$DB/x-ui.db.bak-$(date +%Y%m%d-%H%M)" 2>/dev/null || true
+    setenv KOROVA_REPO "$REPO"
     ls -1t "$DB"/x-ui.db.bak-* 2>/dev/null | tail -n +4 | xargs -r rm -f
     download
     install_files
@@ -238,8 +258,14 @@ case "$CMD" in
     say "Обновлено. Копия базы до обновления: $DB/x-ui.db.bak-*"
     ;;
   token)
-    tok=$(node_token)
-    echo "  ${tok:-Не удалось выпустить ключ}"
+    [ -f "$CREDS" ] || die "Korova ещё не установлена."
+    tok=$(node_key)
+    [ -n "$tok" ] || die "Не удалось выпустить ключ"
+    say "Новый ключ узла (старый больше не работает)"
+    echo
+    printf '\033[1m%s\033[0m\n' "$tok"
+    echo
+    echo "  Вставь его в основной панели: Серверы и каскады → Подключить сервер"
     ;;
   info)
     info

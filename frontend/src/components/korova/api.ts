@@ -177,7 +177,13 @@ export const kq = {
 export const useOverview = () =>
   useQuery({ queryKey: kq.overview, queryFn: () => getObj<Overview>('/overview'), refetchInterval: 15000 });
 export const useKorovaSettings = () =>
-  useQuery({ queryKey: kq.settings, queryFn: () => getObj<KorovaSettings>('/settings') });
+  useQuery({
+    queryKey: kq.settings,
+    queryFn: async () => {
+      const s = await getObj<KorovaSettings>('/settings');
+      return { ...s, inboundIds: s.inboundIds ?? [], adminIds: s.adminIds ?? [], remindDays: s.remindDays ?? [] };
+    },
+  });
 export const useInboundOptions = () =>
   useQuery({ queryKey: kq.inbounds, queryFn: async () => (await getObj<InboundOption[] | null>('/inbounds')) ?? [] });
 export const useSubscribers = (q: string, filter: string) =>
@@ -236,3 +242,19 @@ export function daysLeft(ms: number): number {
 export function inviteLink(botUsername: string | undefined, code: string): string {
   return botUsername ? `https://t.me/${botUsername}?start=${code}` : code;
 }
+
+export interface ConnectNodeResult {
+  id: number;
+  name: string;
+  address: string;
+  reachable: boolean;
+  probeError: string;
+  needConfirm: boolean;
+}
+
+export const useNodeInstallCommand = () =>
+  useQuery({
+    queryKey: ['korova', 'node-install-command'],
+    queryFn: async () => (await getObj<{ command: string }>('/nodes/install-command')).command,
+    staleTime: Infinity,
+  });

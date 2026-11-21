@@ -61,7 +61,7 @@ func LoadSettings() Settings {
 	s := defaultSettings()
 	var row model.KorovaSetting
 	if err := database.GetDB().Where("key = ?", settingsKey).First(&row).Error; err != nil {
-		return s
+		return s.withLists()
 	}
 	_ = json.Unmarshal([]byte(row.Value), &s)
 	if s.Mode != model.KorovaModePaid {
@@ -69,6 +69,20 @@ func LoadSettings() Settings {
 	}
 	if s.DeviceMode != "ip" && s.DeviceMode != "both" {
 		s.DeviceMode = "hwid"
+	}
+	return s.withLists()
+}
+
+// withLists turns nil slices into empty ones: JSON null crashes the settings screen.
+func (s Settings) withLists() Settings {
+	if s.InboundIDs == nil {
+		s.InboundIDs = []int{}
+	}
+	if s.AdminIDs == nil {
+		s.AdminIDs = []int64{}
+	}
+	if s.RemindDays == nil {
+		s.RemindDays = []int{}
 	}
 	return s
 }
