@@ -18,9 +18,9 @@ import {
 
 import KorovaPage, { Section, Status } from '@/components/korova/KorovaPage';
 import HappPreview from '@/components/korova/HappPreview';
-import FullInboundEditor from '@/components/korova/FullInboundEditor';
+import FullInboundEditor, { NewInboundButton } from '@/components/korova/FullInboundEditor';
 import { ManualCascades } from '@/pages/korova/CascadesPage';
-import { ClipboardManager } from '@/utils';
+import { ClipboardManager, HttpUtil } from '@/utils';
 import { getMessage } from '@/utils/messageBus';
 import {
   COUNTRIES,
@@ -30,6 +30,7 @@ import {
   useKorovaPost,
   useKorovaSettings,
   useNodeInstallCommand,
+  useInboundOptions,
   useOverview,
   useServers,
   type ConnectNodeResult,
@@ -189,6 +190,94 @@ function RouteField({
         style={{ width: '100%' }}
       />
     </Field>
+  );
+}
+
+const PROTOCOL_TITLE: Record<string, string> = {
+  vless: 'VLESS',
+  vmess: 'VMess',
+  trojan: 'Trojan',
+  shadowsocks: 'Shadowsocks',
+  hysteria: 'Hysteria 2',
+  tuic: 'TUIC',
+  wireguard: 'WireGuard',
+  amneziawg: 'AmneziaWG',
+};
+
+/** Extra protocols on one server: inbounds in the subscription that Korova did not create itself. */
+function ExtraProtocols({ server, all }: { server: ServerRow; all: ServerRow[] }) {
+  const { data: options = [] } = useInboundOptions();
+  const { data: settings } = useKorovaSettings();
+  const save = useKorovaPost<KorovaSettings>('/settings');
+  const [busy, setBusy] = useState(false);
+  if (!settings) return null;
+
+  const own = new Set(all.flatMap((x) => [x.inboundId, x.entryInboundId]).filter(Boolean));
+  const inSub = new Set(settings.inboundIds);
+  const extras = options.filter((o) => o.nodeId === server.nodeId && inSub.has(o.id) && !own.has(o.id));
+
+  const setIds = (ids: number[]) => save.mutate({ ...settings, inboundIds: ids });
+
+  const remove = async (id: number) => {
+    setBusy(true);
+    try {
+      await new Promise<void>((resolve) =>
+        save.mutate({ ...settings, inboundIds: settings.inboundIds.filter((x) => x !== id) }, { onSettled: () => resolve() }),
+      );
+      await HttpUtil.post(`/panel/api/inbounds/del/${id}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="k-field k-advanced">
+      <div className="k-field-label">Другие протоколы</div>
+      <p className="k-hint" style={{ marginTop: 0 }}>
+        Hysteria 2, TUIC, Trojan, Shadowsocks и всё, что умеет 3x-ui. Новое подключение сразу попадёт в подписку, и
+        каждый пользователь получит в нём свой ключ.
+      </p>
+      {extras.length > 0 && (
+        <ul className="k-extra-list">
+          {extras.map((o) => (
+            <li key={o.id}>
+              <div className="k-extra-main">
+                <b>{o.remark || 'Без названия'}</b>
+                <span className="k-muted">
+                  {PROTOCOL_TITLE[o.protocol] ?? o.protocol} · порт {o.port}
+                  {!o.enable && ' · выключено'}
+                </span>
+              </div>
+              <FullInboundEditor inboundId={o.id} label="Настроить" size="small" />
+              <Popconfirm
+                title="Удалить это подключение?"
+                description="Оно пропадёт из подписки у всех пользователей."
+                okText="Удалить"
+                cancelText="Отмена"
+                okButtonProps={{ danger: true }}
+                onConfirm={() => remove(o.id)}
+              >
+                <Button size="small" type="text" danger loading={busy}>
+                  Удалить
+                </Button>
+              </Popconfirm>
+            </li>
+          ))}
+        </ul>
+      )}
+      <NewInboundButton
+        nodeId={server.nodeId}
+        remark={`${flagOf(server.country)} ${server.name}`.trim()}
+        onCreated={(id) => setIds([...settings.inboundIds, id])}
+      />
+      <p className="k-hint">
+        {server.nodeId === 0
+          ? 'На основном сервере TCP и UDP порт 443 заняты панелью — бери другой, например 8444.'
+          : 'Hysteria и TUIC работают по UDP, поэтому порт 443 можно взять, даже если на нём уже Reality.'}{' '}
+        Для Hysteria и TUIC нужен сертификат: на узле есть /root/cert/node.crt и node.key, а в клиенте тогда включи
+        «разрешить небезопасный».
+      </p>
+    </div>
   );
 }
 
@@ -487,6 +576,7 @@ function ServerDrawer({ server, onClose }: { server: ServerRow | null; onClose: 
           </div>
         </div>
       )}
+      {server.configured && <ExtraProtocols server={server} all={all} />}
     </Drawer>
   );
 }

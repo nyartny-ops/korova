@@ -188,8 +188,12 @@ function tabForValidationPath(path: PropertyKey[]): string {
 interface InboundFormModalProps {
   open: boolean;
   onClose: () => void;
-  onSaved: () => void;
+  onSaved: (inboundId?: number) => void;
   mode: 'add' | 'edit';
+  /** Add mode: preselect the server the new inbound is deployed on (Korova). */
+  defaultNodeId?: number | null;
+  /** Add mode: initial remark (Korova names it after the server). */
+  defaultRemark?: string;
   dbInbound: DBInbound | null;
   dbInbounds: DBInbound[];
   availableNodes?: NodeRecord[];
@@ -252,6 +256,8 @@ export default function InboundFormModal({
   dbInbounds,
   availableNodes,
   availableNodesFetched = true,
+  defaultNodeId,
+  defaultRemark,
 }: InboundFormModalProps) {
   const { t } = useTranslation();
   const uid = useId();
@@ -478,7 +484,11 @@ export default function InboundFormModal({
     const initial =
       mode === 'edit' && dbInbound
         ? withoutClients(rawInboundToFormValues(dbInbound))
-        : buildAddModeValues();
+        : {
+            ...buildAddModeValues(),
+            ...(defaultNodeId ? { nodeId: defaultNodeId } : {}),
+            ...(defaultRemark ? { remark: defaultRemark } : {}),
+          };
     methods.reset(initial);
     savedInboundId.current = null;
     setScanResult(null);
@@ -649,8 +659,10 @@ export default function InboundFormModal({
         : '/panel/api/inbounds/add';
       const msg = await HttpUtil.post(url, payload);
       if (msg?.success) {
+        const savedObj = msg.obj as { id?: number; Id?: number } | null;
+        const savedId = existingId ?? savedObj?.id ?? savedObj?.Id ?? undefined;
         if (isFallbackHost) {
-          const obj = msg.obj as { id?: number; Id?: number } | null;
+          const obj = savedObj;
           const masterId = existingId ?? obj?.id ?? obj?.Id ?? 0;
           if (masterId) savedInboundId.current = masterId;
           if (masterId && !(await saveFallbacks(masterId))) {
@@ -658,7 +670,7 @@ export default function InboundFormModal({
             return;
           }
         }
-        onSaved();
+        onSaved(savedId ?? undefined);
         onClose();
       }
     } finally {

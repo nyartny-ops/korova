@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"strings"
 	"sync"
 
@@ -54,6 +55,17 @@ func (l InboundLook) normalized() InboundLook {
 	return l
 }
 
+// localPortFree reports whether nothing on the main server listens on port yet
+// (Docker, nginx and the like are invisible to the panel's own port check).
+func localPortFree(port int) bool {
+	l, err := net.Listen("tcp", fmt.Sprintf(":%d", port))
+	if err != nil {
+		return false
+	}
+	_ = l.Close()
+	return true
+}
+
 func randHex(n int) string {
 	b := make([]byte, n)
 	_, _ = rand.Read(b)
@@ -87,68 +99,138 @@ func firstUserID() int {
 // the inbound is only being retuned (clients keep working with the same keys).
 func streamFor(look InboundLook, old map[string]any) (string, error) {
 	look = look.normalized()
-	priv, pub, shortID := "", "", ""
-	if rs, ok := old["realitySettings"].(map[string]any); ok {
-		priv, _ = rs["privateKey"].(string)
-		if ids, ok := rs["shortIds"].([]any); ok && len(ids) > 0 {
-			shortID, _ = ids[0].(string)
-		}
-		if st, ok := rs["settings"].(map[string]any); ok {
-			pub, _ = st["publicKey"].(string)
+	// Start from what the inbound has, so tweaks made in the full editor
+	// (uTLS fingerprint, extra SNIs, sockopt, xhttp extras) survive a retune.
+	stream := map[string]any{}
+	for k, v := range old {
+		stream[k] = v
+	}
+	rs := map[string]any{
+		"show": false, "xver": 0, "minClientVer": "", "maxClientVer": "", "maxTimediff": 0, "mldsa65Seed": "",
+	}
+	if oldRS, ok := old["realitySettings"].(map[string]any); ok {
+		for k, v := range oldRS {
+			rs[k] = v
 		}
 	}
+	priv, _ := rs["privateKey"].(string)
+	rsSettings, _ := rs["settings"].(map[string]any)
+	if rsSettings == nil {
+		rsSettings = map[string]any{"fingerprint": "chrome", "serverName": "", "spiderX": "/", "mldsa65Verify": ""}
+	}
+	pub, _ := rsSettings["publicKey"].(string)
 	if priv == "" || pub == "" {
 		var err error
 		if priv, pub, err = x25519Pair(); err != nil {
 			return "", err
 		}
 	}
-	if shortID == "" {
-		shortID = randHex(8)
+	rs["privateKey"] = priv
+	rsSettings["publicKey"] = pub
+	rs["settings"] = rsSettings
+	if ids, ok := rs["shortIds"].([]any); !ok || len(ids) == 0 {
+		rs["shortIds"] = []string{randHex(8)}
 	}
-	stream := map[string]any{
-		"network":       look.Transport,
-		"security":      "reality",
-		"externalProxy": []any{},
-		"realitySettings": map[string]any{
-			"show": false, "xver": 0,
-			"target":       look.SNI + ":443",
-			"serverNames":  []string{look.SNI},
-			"privateKey":   priv,
-			"minClientVer": "", "maxClientVer": "", "maxTimediff": 0,
-			"shortIds":    []string{shortID},
-			"mldsa65Seed": "",
-			"settings": map[string]any{
-				"publicKey": pub, "fingerprint": "chrome", "serverName": "", "spiderX": "/", "mldsa65Verify": "",
-			},
-		},
+	// Only a changed domain replaces target and server names.
+	if look.SNI != firstServerName(rs) {
+		rs["target"] = look.SNI + ":443"
+		rs["serverNames"] = []string{look.SNI}
+	}
+
+	oldNetwork, _ := old["network"].(string)
+	stream["network"] = look.Transport
+	stream["security"] = "reality"
+	stream["realitySettings"] = rs
+	delete(stream, "tlsSettings")
+	if _, ok := stream["externalProxy"]; !ok {
+		stream["externalProxy"] = []any{}
+	}
+	sameNetwork := normalizeNetwork(oldNetwork) == look.Transport
+	for _, key := range []string{"tcpSettings", "rawSettings", "xhttpSettings", "splithttpSettings", "grpcSettings", "wsSettings", "httpupgradeSettings", "kcpSettings"} {
+		if !sameNetwork {
+			delete(stream, key)
+		}
 	}
 	switch look.Transport {
 	case "xhttp":
-		path := "/" + randHex(6)
-		if x, ok := old["xhttpSettings"].(map[string]any); ok {
-			if p, ok := x["path"].(string); ok && p != "" {
-				path = p
+		if _, ok := stream["xhttpSettings"]; !ok {
+			stream["xhttpSettings"] = map[string]any{
+				"path": "/" + randHex(6), "host": "", "mode": "auto", "headers": map[string]any{},
+				"xPaddingBytes": "100-1000", "noSSEHeader": false, "scMaxBufferedPosts": 30,
+				"scMaxEachPostBytes": "1000000", "scStreamUpServerSecs": "20-80",
 			}
-		}
-		stream["xhttpSettings"] = map[string]any{
-			"path": path, "host": "", "mode": "auto", "headers": map[string]any{},
-			"xPaddingBytes": "100-1000", "noSSEHeader": false, "scMaxBufferedPosts": 30,
-			"scMaxEachPostBytes": "1000000", "scStreamUpServerSecs": "20-80",
 		}
 	case "grpc":
-		name := randHex(5)
-		if g, ok := old["grpcSettings"].(map[string]any); ok {
-			if n, ok := g["serviceName"].(string); ok && n != "" {
-				name = n
+		if _, ok := stream["grpcSettings"]; !ok {
+			stream["grpcSettings"] = map[string]any{"serviceName": randHex(5), "authority": "", "multiMode": false}
+		}
+	default:
+		if _, ok := stream["tcpSettings"]; !ok {
+			if _, raw := stream["rawSettings"]; !raw {
+				stream["tcpSettings"] = map[string]any{"acceptProxyProtocol": false, "header": map[string]any{"type": "none"}}
 			}
 		}
-		stream["grpcSettings"] = map[string]any{"serviceName": name, "authority": "", "multiMode": false}
-	default:
-		stream["tcpSettings"] = map[string]any{"acceptProxyProtocol": false, "header": map[string]any{"type": "none"}}
 	}
 	b, err := json.Marshal(stream)
 	return string(b), err
+}
+
+func normalizeNetwork(n string) string {
+	switch n {
+	case "xhttp", "splithttp":
+		return "xhttp"
+	case "grpc":
+		return "grpc"
+	case "", "tcp", "raw":
+		return "tcp"
+	}
+	return n
+}
+
+func firstServerName(rs map[string]any) string {
+	switch v := rs["serverNames"].(type) {
+	case []any:
+		if len(v) > 0 {
+			s, _ := v[0].(string)
+			return s
+		}
+	case []string:
+		if len(v) > 0 {
+			return v[0]
+		}
+	}
+	if t, ok := rs["target"].(string); ok {
+		if i := strings.LastIndex(t, ":"); i > 0 {
+			return t[:i]
+		}
+		return t
+	}
+	return ""
+}
+
+// syncLook refreshes the server's transport and domain from its real inbound:
+// the full editor may have changed them behind Korova's back.
+func syncLook(srv *model.KorovaServer) {
+	if srv == nil || srv.InboundID <= 0 {
+		return
+	}
+	var stream string
+	if database.GetDB().Model(&model.Inbound{}).Where("id = ?", srv.InboundID).
+		Select("stream_settings").Scan(&stream).Error != nil || stream == "" {
+		return
+	}
+	m := map[string]any{}
+	if json.Unmarshal([]byte(stream), &m) != nil {
+		return
+	}
+	if n, _ := m["network"].(string); n != "" {
+		srv.Transport = normalizeNetwork(n)
+	}
+	if rs, ok := m["realitySettings"].(map[string]any); ok {
+		if sni := firstServerName(rs); sni != "" {
+			srv.SNI = sni
+		}
+	}
 }
 
 func portList(nodeID, want int) []int {
@@ -175,6 +257,10 @@ func (s *Service) createRealityInbound(nodeID int, remark string, look InboundLo
 	})
 	var lastErr error
 	for _, port := range portList(nodeID, look.Port) {
+		if nodeID == 0 && look.Port == 0 && !localPortFree(port) {
+			lastErr = fmt.Errorf("порт %d занят другой программой", port)
+			continue
+		}
 		ib := &model.Inbound{
 			UserId:         firstUserID(),
 			Remark:         remark,
@@ -197,6 +283,7 @@ func (s *Service) createRealityInbound(nodeID int, remark string, look InboundLo
 			s.xraySvc.SetToNeedRestart()
 		}
 		if err == nil {
+			s.restartNodeXrayLater(nodeID)
 			return created, nil
 		}
 		lastErr = err
@@ -235,12 +322,18 @@ func (s *Service) retuneInbound(id int, look InboundLook, remark string) error {
 	if needRestart {
 		s.xraySvc.SetToNeedRestart()
 	}
+	if err == nil {
+		s.restartNodeXrayLater(inboundNode(ib))
+	}
 	return err
 }
 
 func (s *Service) deleteInbound(id int) {
 	if !inboundExists(id) {
 		return
+	}
+	if ib, gErr := s.inboundSvc.GetInbound(id); gErr == nil {
+		defer s.restartNodeXrayLater(inboundNode(ib))
 	}
 	needRestart, err := s.inboundSvc.DelInbound(id)
 	if needRestart {
@@ -293,6 +386,7 @@ func (s *Service) getServer(id int) (*model.KorovaServer, error) {
 	if err := database.GetDB().First(srv, id).Error; err != nil {
 		return nil, errors.New("сервер не найден")
 	}
+	syncLook(srv)
 	return srv, nil
 }
 
@@ -485,12 +579,17 @@ func (s *Service) UpdateServer(id int, p ServerPatch) (*model.KorovaServer, erro
 	if p.Port != nil && *p.Port > 0 && *p.Port != inboundPort(srv.InboundID) {
 		port, retune = *p.Port, true
 	}
-	if retune || relabel {
+	if retune {
 		look := lookOf(srv)
 		look.Port = port
 		if err := s.retuneInbound(srv.InboundID, look, displayName(srv)); err != nil {
 			return srv, fmt.Errorf("не удалось применить настройки: %w", err)
 		}
+	} else if relabel {
+		// A new name must not touch transport settings tuned in the full editor.
+		s.renameInbound(srv.InboundID, displayName(srv))
+	}
+	if retune || relabel {
 		if err := s.retuneDependants(srv, relabel); err != nil {
 			return srv, err
 		}
@@ -659,6 +758,7 @@ func (s *Service) Servers() ([]ServerRow, error) {
 	row := func(nodeID int, addr, status string, latency int, tunnel bool, fallbackName string) ServerRow {
 		r := ServerRow{Address: addr, Status: status, LatencyMs: latency, Tunnel: tunnel}
 		if srv, ok := byNode[nodeID]; ok {
+			syncLook(&srv)
 			r.KorovaServer = srv
 			r.Configured = true
 			r.Flag = countryFlag(srv.Country)

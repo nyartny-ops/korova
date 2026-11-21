@@ -15,7 +15,15 @@ const InboundFormModal = lazy(() => import('@/pages/inbounds/form/InboundFormMod
  * Opens the original 3x-ui connection editor (all tabs: protocol, transport,
  * Reality, sniffing, raw JSON) for one inbound Korova manages.
  */
-export default function FullInboundEditor({ inboundId, label }: { inboundId: number; label: string }) {
+export default function FullInboundEditor({
+  inboundId,
+  label,
+  size,
+}: {
+  inboundId: number;
+  label: string;
+  size?: 'small' | 'middle';
+}) {
   const qc = useQueryClient();
   const { nodes, fetched } = useNodesQuery();
   const [inbound, setInbound] = useState<DBInbound | null>(null);
@@ -38,7 +46,7 @@ export default function FullInboundEditor({ inboundId, label }: { inboundId: num
 
   return (
     <>
-      <Button onClick={open} loading={loading} disabled={!inboundId}>
+      <Button onClick={open} loading={loading} disabled={!inboundId} size={size}>
         {label}
       </Button>
       {inbound && (
@@ -53,6 +61,46 @@ export default function FullInboundEditor({ inboundId, label }: { inboundId: num
             onClose={() => setInbound(null)}
             onSaved={() => {
               qc.invalidateQueries({ queryKey: ['korova'] });
+            }}
+          />
+        </Suspense>
+      )}
+    </>
+  );
+}
+
+/**
+ * Opens the original editor in add mode on a given server: any protocol
+ * (Hysteria, TUIC, Trojan, Shadowsocks…). onCreated gets the new inbound id.
+ */
+export function NewInboundButton({
+  nodeId,
+  remark,
+  onCreated,
+}: {
+  nodeId: number;
+  remark: string;
+  onCreated: (id: number) => void;
+}) {
+  const { nodes, fetched } = useNodesQuery();
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <Button onClick={() => setOpen(true)}>Добавить протокол</Button>
+      {open && (
+        <Suspense fallback={null}>
+          <InboundFormModal
+            open
+            mode="add"
+            dbInbound={null}
+            dbInbounds={[]}
+            availableNodes={nodes}
+            availableNodesFetched={fetched}
+            defaultNodeId={nodeId || null}
+            defaultRemark={remark}
+            onClose={() => setOpen(false)}
+            onSaved={(id) => {
+              if (id) onCreated(id);
             }}
           />
         </Suspense>

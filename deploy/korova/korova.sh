@@ -198,7 +198,7 @@ node_key() {
   line=$(xui setting -getApiToken -tokenName korova-master -tokenScope node-admin 2>/dev/null | grep apiToken || true)
   tok=$(echo "${line#*apiToken:}" | tr -d '[:space:]')
   [ -n "$tok" ] || return 0
-  port=$(xui setting -show true 2>/dev/null | awk '$1=="port:" {print $2; exit}')
+  port=$(xui setting -show true 2>/dev/null | awk '$1=="port:" && !p {print $2; p=1}')
   base=$(sed -n 's/^base=//p' "$CREDS" 2>/dev/null)
   fp=$(openssl x509 -in /root/cert/node.crt -noout -fingerprint -sha256 2>/dev/null | cut -d= -f2 | tr -d ':')
   ip=$(curl -fsS4 --max-time 5 https://ifconfig.me 2>/dev/null || hostname -I | awk '{print $1}')
@@ -223,7 +223,7 @@ tunnel() {
   [ -f "$key" ] || ssh-keygen -q -t ed25519 -N '' -C "$tag" -f "$key"
   port=$(getenv KOROVA_TUNNEL_PORT)
   if [ -z "$port" ]; then port=$((20000 + RANDOM % 10000)); setenv KOROVA_TUNNEL_PORT "$port"; fi
-  panel_port=$(xui setting -show true 2>/dev/null | awk '$1=="port:" {print $2; exit}')
+  panel_port=$(xui setting -show true 2>/dev/null | awk '$1=="port:" && !p {print $2; p=1}')
   panel_port=${panel_port:-2053}
   public=$(curl -fsS4 --max-time 5 https://ifconfig.me 2>/dev/null || hostname -I | awk '{print $1}')
 
@@ -232,7 +232,12 @@ tunnel() {
   # The key may only open 127.0.0.1:$port there: no shell, no other forwards.
   printf 'restrict,port-forwarding,permitlisten="127.0.0.1:%s",command="/bin/false" %s\n' "$port" "$(cat "$key.pub")" \
     | ssh -o StrictHostKeyChecking=accept-new root@"$master" \
-      "mkdir -p ~/.ssh && chmod 700 ~/.ssh && f=~/.ssh/authorized_keys && touch \$f && grep -v '$tag' \$f > \$f.korova || true; cat >> \$f.korova && mv \$f.korova \$f && chmod 600 \$f" \
+      "mkdir -p ~/.ssh && chmod 700 ~/.ssh && f=~/.ssh/authorized_keys && touch \$f && grep -v '$tag' \$f > \$f.korova || true; cat >> \$f.korova && mv \$f.korova \$f && chmod 600 \$f; \
+       if [ -d /etc/ssh/sshd_config.d ] && [ ! -f /etc/ssh/sshd_config.d/korova-tunnel.conf ]; then \
+         printf 'ClientAliveInterval 15\\nClientAliveCountMax 3\\n' > /etc/ssh/sshd_config.d/korova-tunnel.conf; \
+         (systemctl reload ssh || systemctl reload sshd) >/dev/null 2>&1; fi; \
+       pid=\$(ss -ltnp 'sport = :$port' 2>/dev/null | grep -o 'pid=[0-9]*' | head -1 | cut -d= -f2); \
+       [ -n \"\$pid\" ] && kill \$pid 2>/dev/null; true" \
     || die "Не удалось зайти на $master. Проверь IP и root-пароль."
   ok "Ключ туннеля добавлен"
 

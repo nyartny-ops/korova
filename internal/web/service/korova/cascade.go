@@ -228,6 +228,8 @@ func (s *Service) editEntryTemplate(c *model.KorovaCascade, mutate func(map[stri
 	if _, err := remote.Call(ctx, http.MethodPost, "panel/api/xray/update", form); err != nil {
 		return fmt.Errorf("нода не приняла новые настройки: %w", err)
 	}
+	// The node saves the template but runs the old config until Xray restarts.
+	s.restartNodeXrayLater(node.Id)
 	return nil
 }
 
