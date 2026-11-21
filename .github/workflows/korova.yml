@@ -1,0 +1,122 @@
+name: Korova build
+
+# Every push to main builds static Linux packages and republishes the rolling
+# "korova-latest" release that korova.sh on the servers downloads from.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: korova-build
+  cancel-in-progress: true
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [amd64, arm64]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          check-latest: true
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Build panel UI
+        working-directory: frontend
+        run: |
+          npm ci
+          npm install --no-save --no-audit --no-fund @fontsource-variable/onest@5
+          npm run build
+
+      - name: Build static binary
+        run: |
+          CURL_RETRY="--retry 5 --retry-all-errors --retry-delay 3"
+          case "${{ matrix.platform }}" in
+            amd64) BOOTLIN_ARCH="x86-64" ;;
+            arm64) BOOTLIN_ARCH="aarch64" ;;
+          esac
+          # Static musl toolchain: the binary runs on any distro and glibc version.
+          BASE="https://toolchains.bootlin.com/downloads/releases/toolchains/$BOOTLIN_ARCH/tarballs/"
+          TARBALL=$(curl -fsSL $CURL_RETRY "$BASE" | grep -oE "${BOOTLIN_ARCH}--musl--stable-[^\"]+\.tar\.xz" | sort -r | head -n1)
+          [ -n "$TARBALL" ] || { echo "No Bootlin toolchain for $BOOTLIN_ARCH" >&2; exit 1; }
+          cd /tmp && curl -fsSL $CURL_RETRY -o "$TARBALL" "$BASE$TARBALL" && tar -xf "$TARBALL" && cd -
+          TC=$(find /tmp -maxdepth 1 -type d -name "${BOOTLIN_ARCH}--musl--stable-*" | head -n1)
+          export PATH="$TC/bin:$PATH"
+          export CC=$(find "$TC/bin" -name '*-gcc.br_real' -type f -executable | head -n1)
+          export CGO_ENABLED=1 GOOS=linux GOARCH=${{ matrix.platform }}
+          export CGO_CFLAGS="-D_LARGEFILE64_SOURCE"
+          go build -trimpath -ldflags "-w -s -linkmode external -extldflags '-static'" -o x-ui/x-ui main.go
+          file x-ui/x-ui
+
+      - name: Add Xray, address databases and service files
+        run: |
+          case "${{ matrix.platform }}" in
+            amd64) XZIP=64 ;;
+            arm64) XZIP=arm64-v8a ;;
+          esac
+          ARCH=${{ matrix.platform }}
+          mkdir -p x-ui/bin x-ui/internal/web
+          cd x-ui/bin
+          curl -fsSLO "https://github.com/XTLS/Xray-core/releases/download/v26.11.9/Xray-linux-${XZIP}.zip"
+          unzip -oq "Xray-linux-${XZIP}.zip" xray && rm -f "Xray-linux-${XZIP}.zip"
+          mv xray "xray-linux-${ARCH}" && chmod +x "xray-linux-${ARCH}"
+          MTGV=$(curl -fsSL -H "Authorization: Bearer ${{ github.token }}" https://api.github.com/repos/mhsanaei/mtg-multi/releases/latest | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' | head -1)
+          if [ -n "$MTGV" ]; then
+            P="mtg-multi-${MTGV#v}-linux-${ARCH}"
+            curl -fsSLO "https://github.com/mhsanaei/mtg-multi/releases/download/${MTGV}/${P}.tar.gz" \
+              && tar -xzf "${P}.tar.gz" && mv "${P}/mtg-multi" "mtg-linux-${ARCH}" && rm -rf "${P}" "${P}.tar.gz" || true
+          fi
+          curl -fsSLO https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geoip.dat
+          curl -fsSLO https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geosite.dat
+          curl -fsSLo geoip_RU.dat https://github.com/runetfreedom/russia-v2ray-rules-dat/releases/latest/download/geoip.dat
+          curl -fsSLo geosite_RU.dat https://github.com/runetfreedom/russia-v2ray-rules-dat/releases/latest/download/geosite.dat
+          cd ../..
+          cp -r internal/web/translation x-ui/internal/web/
+          cp x-ui.service.debian x-ui/x-ui.service
+          echo "${GITHUB_SHA::7}" > x-ui/KOROVA_VERSION
+          tar -czf "korova-linux-${ARCH}.tar.gz" x-ui
+          ls -lh "korova-linux-${ARCH}.tar.gz"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: korova-linux-${{ matrix.platform }}
+          path: korova-linux-${{ matrix.platform }}.tar.gz
+          retention-days: 3
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/download-artifact@v8
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Publish korova-latest release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # The installer has the repository baked in, so servers need no settings.
+          sed "s|__KOROVA_REPO__|${{ github.repository }}|" deploy/korova/korova.sh > dist/korova.sh
+          git tag -f korova-latest
+          git push -f origin refs/tags/korova-latest
+          gh release view korova-latest >/dev/null 2>&1 || \
+            gh release create korova-latest --title "Korova (последняя сборка)" --notes "Собирается автоматически при каждом изменении в main."
+          gh release edit korova-latest --notes "Сборка ${GITHUB_SHA::7} от $(date -u '+%Y-%m-%d %H:%M') UTC"
+          gh release upload korova-latest dist/korova-linux-*.tar.gz dist/korova.sh --clobber
