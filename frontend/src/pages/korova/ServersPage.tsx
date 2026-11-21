@@ -18,6 +18,7 @@ import {
 
 import KorovaPage, { Section, Status } from '@/components/korova/KorovaPage';
 import HappPreview from '@/components/korova/HappPreview';
+import FullInboundEditor from '@/components/korova/FullInboundEditor';
 import { ManualCascades } from '@/pages/korova/CascadesPage';
 import { ClipboardManager } from '@/utils';
 import { getMessage } from '@/utils/messageBus';
@@ -132,10 +133,81 @@ function LookFields({ v, set, portHint }: { v: LookForm; set: (p: Partial<LookFo
   );
 }
 
+/** Servers a new one can go through: configured, not routed themselves, not itself. */
+function entryServers(all: ServerRow[], selfNodeId?: number) {
+  return all.filter((x) => x.configured && !x.viaServerId && x.nodeId !== selfNodeId);
+}
+
+/** Default route: through the Russian entry server when there is one. */
+function defaultRoute(all: ServerRow[], selfNodeId?: number, selfCountry?: string) {
+  if (selfCountry === 'RU') return 'direct';
+  const ru = entryServers(all, selfNodeId).find((x) => x.country === 'RU');
+  return ru ? `${ru.id}:only` : 'direct';
+}
+
+function parseRoute(v: string) {
+  if (v === 'direct') return { viaServerId: 0, keepDirect: false };
+  const [id, mode] = v.split(':');
+  return { viaServerId: Number(id), keepDirect: mode === 'both' };
+}
+
+function RouteField({
+  all,
+  selfNodeId,
+  value,
+  onChange,
+}: {
+  all: ServerRow[];
+  selfNodeId?: number;
+  value: string;
+  onChange: (v: string) => void;
+}) {
+  const entries = entryServers(all, selfNodeId);
+  if (entries.length === 0) return null;
+  const options = [
+    { value: 'direct', label: 'Напрямую', text: 'Пользователь подключается прямо к этому серверу.' },
+    ...entries.flatMap((e) => [
+      {
+        value: `${e.id}:only`,
+        label: `Через ${flagOf(e.country)} ${e.name}`.replace('  ', ' '),
+        text: `Подключение идёт на ${e.name}: российские сайты открываются оттуда, остальное — с этого сервера.`,
+      },
+      {
+        value: `${e.id}:both`,
+        label: `Оба варианта`,
+        text: `В подписке будут два пункта: напрямую и через ${e.name}.`,
+      },
+    ]),
+  ];
+  const current = options.find((o) => o.value === value) ?? options[0];
+  return (
+    <Field label="Маршрут" hint={current.text}>
+      <Select
+        value={current.value}
+        onChange={onChange}
+        options={options.map((o) => ({ value: o.value, label: o.label }))}
+        style={{ width: '100%' }}
+      />
+    </Field>
+  );
+}
+
 function ConnectDrawer({ open, onClose }: { open: boolean; onClose: () => void }) {
   const { data: command } = useNodeInstallCommand();
+  const { data: servers = [] } = useServers();
+  const [route, setRoute] = useState<string | null>(null);
+  const routeNow = route ?? defaultRoute(servers);
   const connect = useKorovaPost<
-    { key: string; name: string; country: string; look: InboundLook; publish: boolean; force: boolean },
+    {
+      key: string;
+      name: string;
+      country: string;
+      look: InboundLook;
+      publish: boolean;
+      force: boolean;
+      viaServerId: number;
+      keepDirect: boolean;
+    },
     ConnectNodeResult
   >('/nodes/connect');
   const [key, setKey] = useState('');
@@ -149,6 +221,7 @@ function ConnectDrawer({ open, onClose }: { open: boolean; onClose: () => void }
   const reset = () => {
     setKey('');
     setResult(null);
+    setRoute(null);
     setLook({ name: '', country: '', transport: 'tcp', sni: '' });
   };
 
@@ -161,6 +234,7 @@ function ConnectDrawer({ open, onClose }: { open: boolean; onClose: () => void }
         look: { transport: look.transport, sni: look.sni, port: look.port },
         publish,
         force,
+        ...parseRoute(look.country === 'RU' ? 'direct' : routeNow),
       },
       { onSuccess: (r) => setResult(r), onError: () => setResult(null) },
     );
@@ -197,6 +271,15 @@ function ConnectDrawer({ open, onClose }: { open: boolean; onClose: () => void }
                 : 'Чтобы он появился у пользователей, нажми «Добавить в подписку» у сервера в списке.'}
             {!result.reachable && ' Сейчас связи с ним нет — он станет «онлайн», когда она появится.'}
           </p>
+          {result.routeError && (
+            <Alert
+              type="warning"
+              showIcon
+              style={{ textAlign: 'left', marginBottom: 16 }}
+              title="Маршрут не настроился"
+              description={`Сервер пока раздаётся напрямую. ${result.routeError}. Маршрут можно выбрать в списке серверов.`}
+            />
+          )}
           <Button
             type="primary"
             onClick={() => {
@@ -243,7 +326,12 @@ function ConnectDrawer({ open, onClose }: { open: boolean; onClose: () => void }
             <Checkbox checked={publish} onChange={(e) => setPublish(e.target.checked)} style={{ marginBottom: 14 }}>
               Сразу добавить в подписку
             </Checkbox>
-            {publish && <LookFields v={look} set={(p) => setLook((prev) => ({ ...prev, ...p }))} />}
+            {publish && (
+              <>
+                <LookFields v={look} set={(p) => setLook((prev) => ({ ...prev, ...p }))} />
+                {look.country !== 'RU' && <RouteField all={servers} value={routeNow} onChange={setRoute} />}
+              </>
+            )}
           </li>
           <li className="k-flow-actions">
             <Button type="primary" size="large" disabled={!key.trim()} loading={connect.isPending} onClick={() => run(false)}>
@@ -283,9 +371,12 @@ function ConnectDrawer({ open, onClose }: { open: boolean; onClose: () => void }
 
 function ServerDrawer({ server, onClose }: { server: ServerRow | null; onClose: () => void }) {
   const update = useKorovaPost<ServerPatch & { id: number }, ServerRow>((b) => `/servers/${b.id}`);
-  const publish = useKorovaPost<{ nodeId: number; name: string; country: string; look: InboundLook }, ServerRow>(
-    '/servers/publish',
-  );
+  const publish = useKorovaPost<
+    { nodeId: number; name: string; country: string; look: InboundLook; viaServerId: number; keepDirect: boolean },
+    ServerRow
+  >('/servers/publish');
+  const { data: all = [] } = useServers();
+  const [route, setRoute] = useState<string | null>(null);
   const remove = useKorovaPost<{ id: number }>((b) => `/servers/${b.id}/del`);
   const [v, setV] = useState<LookForm>({ name: '', country: '', transport: 'tcp', sni: '' });
 
@@ -298,10 +389,13 @@ function ServerDrawer({ server, onClose }: { server: ServerRow | null; onClose: 
         sni: server.sni,
         port: server.port || undefined,
       });
+      setRoute(null);
     }
   }, [server]);
 
   if (!server) return <Drawer open={false} onClose={onClose} />;
+  const routeNow = route ?? defaultRoute(all, server.nodeId, v.country || server.country);
+  const via = all.find((x) => x.id === server.viaServerId);
 
   const save = () => {
     if (server.configured) {
@@ -316,6 +410,7 @@ function ServerDrawer({ server, onClose }: { server: ServerRow | null; onClose: 
           name: v.name,
           country: v.country,
           look: { transport: v.transport, sni: v.sni, port: v.port },
+          ...parseRoute(v.country === 'RU' ? 'direct' : routeNow),
         },
         { onSuccess: onClose },
       );
@@ -366,10 +461,31 @@ function ServerDrawer({ server, onClose }: { server: ServerRow | null; onClose: 
         set={(p) => setV((prev) => ({ ...prev, ...p }))}
         portHint={server.configured ? `Сейчас ${server.port}.` : undefined}
       />
+      {!server.configured && v.country !== 'RU' && (
+        <RouteField all={all} selfNodeId={server.nodeId} value={routeNow} onChange={setRoute} />
+      )}
       {server.configured && server.viaServerId === 0 && (
         <p className="k-hint">
           Если через этот сервер идут другие (он «вход»), их входы тоже получат эти транспорт и домен.
         </p>
+      )}
+      {server.configured && (
+        <div className="k-field k-advanced">
+          <div className="k-field-label">Все настройки</div>
+          <p className="k-hint" style={{ marginTop: 0 }}>
+            Полный редактор подключения, как в оригинальной 3x-ui: протокол, транспорт, Reality, сниффинг, JSON. Если
+            потом сохранить эту форму, Korova перезапишет транспорт, домен и порт — остальное останется.
+          </p>
+          <div className="k-advanced-actions">
+            <FullInboundEditor inboundId={server.inboundId} label="Подключение сервера" />
+            {via && server.entryInboundId > 0 && (
+              <FullInboundEditor
+                inboundId={server.entryInboundId}
+                label={`Вход на ${flagOf(via.country)} ${via.name}`.replace('  ', ' ')}
+              />
+            )}
+          </div>
+        </div>
       )}
     </Drawer>
   );

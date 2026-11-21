@@ -81,7 +81,11 @@ func (s *Service) CreateCascade(req CascadeRequest) (*model.KorovaCascade, error
 		}
 	}
 	if address == "" {
-		return nil, errors.New("укажите публичный адрес выходного сервера")
+		// The main server: its public name is the subscription domain.
+		address = nodeAddress(nodeOf(exit))
+	}
+	if address == "" {
+		return nil, errors.New("не знаю публичный адрес выходного сервера: укажи домен подписки в «Бот и доступ»")
 	}
 
 	c := &model.KorovaCascade{

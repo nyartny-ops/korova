@@ -570,6 +570,8 @@ body {
 
 /* ---------- copy field ---------- */
 .k-copy {
+  min-width: 0;
+  max-width: 100%;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -1243,6 +1245,12 @@ body:not(.dark) .ant-sidebar > .ant-layout-sider {
 /* ---------- forms inside drawers ---------- */
 .k-field {
   margin-bottom: 20px;
+  min-width: 0;
+}
+
+/* Long commands and keys must never widen a drawer past the screen. */
+.ant-drawer .ant-drawer-body {
+  overflow-x: hidden;
 }
 
 .k-field-label {
@@ -1277,7 +1285,12 @@ body:not(.dark) .ant-sidebar > .ant-layout-sider {
   margin: 0;
   padding: 0;
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 26px;
+}
+
+.k-flow > li {
+  min-width: 0;
 }
 
 .k-flow > li:not(.k-flow-actions):not(.ant-alert) {
@@ -1432,3 +1445,7 @@ body:not(.dark) .ant-sidebar > .ant-layout-sider {
   color: #8e95a3;
   line-height: 1.45;
 }
+
+/* Full 3x-ui editor entry point inside the server drawer */
+.k-advanced { margin-top: 28px; padding-top: 20px; border-top: 1px solid var(--k-line); }
+.k-advanced-actions { display: flex; flex-wrap: wrap; gap: 8px; }

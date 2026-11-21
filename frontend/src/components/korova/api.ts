@@ -255,6 +255,7 @@ export interface ConnectNodeResult {
   published: boolean;
   serverName: string;
   publishError: string;
+  routeError: string;
 }
 
 export const useNodeInstallCommand = () =>

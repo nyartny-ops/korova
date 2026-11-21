@@ -75,12 +75,14 @@ func uniqueNodeName(want string) string {
 }
 
 type ConnectNodeRequest struct {
-	Key     string      `json:"key"`
-	Name    string      `json:"name"`
-	Force   bool        `json:"force"`
-	Publish bool        `json:"publish"`
-	Country string      `json:"country"`
-	Look    InboundLook `json:"look"`
+	Key        string      `json:"key"`
+	Name       string      `json:"name"`
+	Force      bool        `json:"force"`
+	Publish    bool        `json:"publish"`
+	Country    string      `json:"country"`
+	Look       InboundLook `json:"look"`
+	Via        int         `json:"viaServerId"`
+	KeepDirect bool        `json:"keepDirect"`
 }
 
 type ConnectNodeResult struct {
@@ -93,6 +95,7 @@ type ConnectNodeResult struct {
 	Published   bool   `json:"published"`
 	ServerName  string `json:"serverName"`
 	PublishErr  string `json:"publishError"`
+	RouteErr    string `json:"routeError"`
 }
 
 // ConnectNode adds a node from its one-line key. An unreachable node is only
@@ -185,8 +188,13 @@ func (s *Service) ConnectNode(req ConnectNodeRequest) (*ConnectNodeResult, error
 		return res, err
 	}
 	if req.Publish {
-		srv, pErr := s.PublishServer(PublishRequest{NodeID: res.Id, Name: req.Name, Country: req.Country, Look: req.Look})
-		if pErr != nil {
+		srv, pErr := s.PublishServer(PublishRequest{NodeID: res.Id, Name: req.Name, Country: req.Country, Look: req.Look, Via: req.Via, KeepDirect: req.KeepDirect})
+		var routeErr ErrRoute
+		if errors.As(pErr, &routeErr) {
+			res.Published = true
+			res.ServerName = displayName(srv)
+			res.RouteErr = routeErr.Err.Error()
+		} else if pErr != nil {
 			res.PublishErr = pErr.Error()
 		} else {
 			res.Published = true

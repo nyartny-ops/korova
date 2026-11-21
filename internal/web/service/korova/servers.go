@@ -333,10 +333,19 @@ func nodeAddress(nodeID int) string {
 }
 
 type PublishRequest struct {
-	NodeID  int         `json:"nodeId"`
-	Name    string      `json:"name"`
-	Country string      `json:"country"`
-	Look    InboundLook `json:"look"`
+	NodeID     int         `json:"nodeId"`
+	Name       string      `json:"name"`
+	Country    string      `json:"country"`
+	Look       InboundLook `json:"look"`
+	Via        int         `json:"viaServerId"`
+	KeepDirect bool        `json:"keepDirect"`
+}
+
+// ErrRoute marks a publish that worked but whose route through another server did not.
+type ErrRoute struct{ Err error }
+
+func (e ErrRoute) Error() string {
+	return "сервер добавлен в подписку напрямую, а маршрут не настроился: " + e.Err.Error()
 }
 
 // PublishServer makes a node a subscriber-facing server: creates its inbound if
@@ -344,7 +353,26 @@ type PublishRequest struct {
 func (s *Service) PublishServer(req PublishRequest) (*model.KorovaServer, error) {
 	serversMu.Lock()
 	defer serversMu.Unlock()
-	return s.publishLocked(req)
+	srv, err := s.publishLocked(req)
+	if err != nil || req.Via <= 0 || srv.ViaServerID == req.Via {
+		return srv, err
+	}
+	via, vErr := s.getServer(req.Via)
+	if vErr != nil {
+		return srv, nil
+	}
+	// Russian sites through a Russian server only make sense for servers abroad.
+	if srv.Country != "" && srv.Country == via.Country {
+		return srv, nil
+	}
+	srv.KeepDirect = req.KeepDirect
+	rErr := s.routeLocked(srv, req.Via)
+	database.GetDB().Save(srv)
+	_ = s.applyServerSubscription(srv)
+	if rErr != nil {
+		return srv, ErrRoute{rErr}
+	}
+	return srv, nil
 }
 
 func (s *Service) publishLocked(req PublishRequest) (*model.KorovaServer, error) {
