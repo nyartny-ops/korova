@@ -6,6 +6,7 @@
 #   korova token            # new API key for a node
 #   korova info             # panel address and login
 set -euo pipefail
+trap 'rc=$?; [ $rc -ne 0 ] && printf "\n\033[31m✗ Остановилось на строке %s (код %s). Пришли этот вывод.\033[0m\n" "$LINENO" "$rc" >&2' EXIT
 
 REPO="${KOROVA_REPO:-__KOROVA_REPO__}"
 CMD="${1:-install}"
@@ -18,7 +19,7 @@ TMP=/var/tmp/korova-pkg
 
 say() { printf '\n\033[1;35m▸ %s\033[0m\n' "$*"; }
 ok() { printf '  \033[32m✓\033[0m %s\n' "$*"; }
-die() { printf '\n\033[31m✗ %s\033[0m\n' "$*" >&2; exit 1; }
+die() { trap - EXIT; printf '\n\033[31m✗ %s\033[0m\n' "$*" >&2; exit 1; }
 
 [ "$(id -u)" -eq 0 ] || die "Запусти от root."
 [[ "$REPO" == */* && "$REPO" != *__* ]] || die "Не знаю, откуда качать. Запусти так: KOROVA_REPO=твой_ник/korova bash korova.sh $CMD"
@@ -35,6 +36,8 @@ setenv() {
   if grep -qE "^$1=" "$ENVF"; then sed -i "s|^$1=.*|$1=$2|" "$ENVF"; else echo "$1=$2" >> "$ENVF"; fi
 }
 xui() { (cd "$APP" && set -a && . "$ENVF" && set +a && ./x-ui "$@"); }
+# tr|head ends with SIGPIPE, which pipefail + set -e would turn into a silent exit.
+rnd() { LC_ALL=C tr -dc "$1" </dev/urandom 2>/dev/null | head -c "$2" || true; }
 
 remove_old_attempts() {
   if command -v docker >/dev/null 2>&1; then
@@ -157,9 +160,9 @@ EOF
 first_credentials() {
   [ -f "$CREDS" ] && return 0
   local user pass base
-  user="korova$(tr -dc 'a-z0-9' </dev/urandom | head -c 4)"
-  pass="$(tr -dc 'A-Za-z0-9' </dev/urandom | head -c 20)"
-  base="/$(tr -dc 'a-z0-9' </dev/urandom | head -c 12)/"
+  user="korova$(rnd 'a-z0-9' 4)"
+  pass="$(rnd 'A-Za-z0-9' 20)"
+  base="/$(rnd 'a-z0-9' 12)/"
   if [ "$ROLE" = master ]; then
     xui setting -username "$user" -password "$pass" -webBasePath "$base" -port 2053 -listenIP 127.0.0.1 >/dev/null
   else

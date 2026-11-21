@@ -202,7 +202,7 @@ export function useKorovaPost<TBody = unknown, TObj = unknown>(path: string | ((
   return useMutation({
     mutationFn: async (body: TBody) => {
       const url = BASE + (typeof path === 'function' ? path(body) : path);
-      const msg = await HttpUtil.post<TObj>(url, body);
+      const msg = await HttpUtil.post<TObj>(url, body ?? {}, { headers: { 'Content-Type': 'application/json' } });
       if (!msg.success) throw new Error(msg.msg);
       return msg.obj as TObj;
     },
