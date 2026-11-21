@@ -116,3 +116,23 @@ type KorovaCascade struct {
 }
 
 func (KorovaCascade) TableName() string { return "korova_cascades" }
+
+// KorovaServer is a VPN server as the admin sees it: one node (or the main panel,
+// NodeID 0) with the inbound Korova created on it and how users reach it.
+type KorovaServer struct {
+	Id             int    `json:"id" gorm:"primaryKey;autoIncrement"`
+	NodeID         int    `json:"nodeId" gorm:"uniqueIndex"`
+	Name           string `json:"name"`
+	Country        string `json:"country"`
+	Transport      string `json:"transport" gorm:"default:tcp"`
+	SNI            string `json:"sni"`
+	InboundID      int    `json:"inboundId"`
+	InSub          bool   `json:"inSub" gorm:"default:true"`
+	ViaServerID    int    `json:"viaServerId" gorm:"default:0"`
+	KeepDirect     bool   `json:"keepDirect" gorm:"default:false"`
+	EntryInboundID int    `json:"entryInboundId" gorm:"default:0"`
+	CascadeID      int    `json:"cascadeId" gorm:"default:0"`
+	CreatedAt      int64  `json:"createdAt" gorm:"autoCreateTime:milli"`
+}
+
+func (KorovaServer) TableName() string { return "korova_servers" }

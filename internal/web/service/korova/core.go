@@ -57,12 +57,17 @@ func (s *Service) SaveSettings(next Settings) error {
 	if prev.Mode != next.Mode && next.Mode == model.KorovaModePaid {
 		go s.closeFreeAccess()
 	}
-	if !sameInts(prev.InboundIDs, next.InboundIDs) || prev.DeviceMode != next.DeviceMode {
+	serversChanged := !sameInts(prev.InboundIDs, next.InboundIDs)
+	if serversChanged || prev.DeviceMode != next.DeviceMode {
 		go func() {
 			if _, err := s.SyncAll(); err != nil {
 				logger.Warning("korova: sync after settings change:", err)
 			}
 		}()
+	}
+	if serversChanged || prev.AutoSelect != next.AutoSelect || prev.BrandName != next.BrandName ||
+		prev.SupportURL != next.SupportURL || prev.ManageSubLook != next.ManageSubLook {
+		go s.ApplySubscriptionLook()
 	}
 	return nil
 }
@@ -184,6 +189,7 @@ func (s *Service) applyClient(u *model.KorovaUser) error {
 		payload := &service.ClientCreatePayload{
 			Client: model.Client{
 				ID:         uuid.NewString(),
+				Flow:       "xtls-rprx-vision",
 				Email:      u.ClientEmail,
 				SubID:      u.SubID,
 				LimitIP:    limitIP,
@@ -211,6 +217,14 @@ func (s *Service) applyClient(u *model.KorovaUser) error {
 			attachRestart, err = s.clientSvc.Attach(&s.inboundSvc, rec.Id, inboundIDs)
 			needRestart = needRestart || attachRestart
 		}
+		// A server taken out of the subscription must lose this subscriber's key too.
+		if err == nil && len(inboundIDs) > 0 {
+			if extra := s.extraInbounds(rec.Id, inboundIDs); len(extra) > 0 {
+				var detachRestart bool
+				detachRestart, err = s.clientSvc.DetachByEmailMany(&s.inboundSvc, u.ClientEmail, extra)
+				needRestart = needRestart || detachRestart
+			}
+		}
 	}
 	if needRestart {
 		s.xraySvc.SetToNeedRestart()
@@ -221,6 +235,24 @@ func (s *Service) applyClient(u *model.KorovaUser) error {
 		return err
 	}
 	return saveErr
+}
+
+func (s *Service) extraInbounds(recordID int, wanted []int) []int {
+	current, err := s.clientSvc.GetInboundIdsForRecord(recordID)
+	if err != nil {
+		return nil
+	}
+	keep := map[int]bool{}
+	for _, id := range wanted {
+		keep[id] = true
+	}
+	var extra []int
+	for _, id := range current {
+		if !keep[id] {
+			extra = append(extra, id)
+		}
+	}
+	return extra
 }
 
 func (s *Service) validInboundIDs(ids []int) []int {

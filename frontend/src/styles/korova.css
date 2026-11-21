@@ -1148,3 +1148,287 @@ body:not(.dark) .ant-sidebar > .ant-layout-sider {
   -webkit-text-fill-color: currentColor;
   animation: none;
 }
+
+/* ---------- servers ---------- */
+.k-srv-list {
+  display: grid;
+}
+
+.k-srv {
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr) auto;
+  gap: 14px;
+  align-items: center;
+  padding: 16px 20px;
+  border-top: 1px solid var(--k-line);
+}
+
+.k-srv:first-child {
+  border-top: 0;
+}
+
+.k-srv.is-muted .k-srv-flag,
+.k-srv.is-muted .k-srv-main {
+  opacity: 0.5;
+}
+
+.k-srv-flag {
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  background: var(--k-sunken);
+  display: grid;
+  place-items: center;
+  font-size: 24px;
+  line-height: 1;
+  color: var(--k-ink-3);
+}
+
+.k-srv-name {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.k-srv-meta {
+  margin-top: 3px;
+  font-size: 13px;
+  color: var(--k-ink-3);
+  font-variant-numeric: tabular-nums;
+}
+
+.k-srv-error {
+  margin-top: 6px;
+  font-size: 13px;
+  color: var(--k-bad);
+}
+
+.k-srv-controls {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.k-srv-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13.5px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.k-srv-foot {
+  padding: 12px 20px 16px;
+  border-top: 1px solid var(--k-line);
+  font-size: 13px;
+  color: var(--k-ink-3);
+}
+
+@media (max-width: 900px) {
+  .k-srv {
+    grid-template-columns: 44px minmax(0, 1fr);
+  }
+  .k-srv-controls {
+    grid-column: 1 / -1;
+    justify-content: flex-start;
+  }
+}
+
+/* ---------- forms inside drawers ---------- */
+.k-field {
+  margin-bottom: 20px;
+}
+
+.k-field-label {
+  font-size: 14px;
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+
+.k-choice.k-choice-3 {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 8px;
+}
+
+.k-choice-3 .k-choice-item {
+  padding: 12px 14px 12px 42px;
+}
+
+.k-choice-3 .k-choice-item::before {
+  top: 14px;
+}
+
+.k-mono-input,
+.k-mono-input textarea {
+  font-family: var(--k-mono) !important;
+  font-size: 12.5px !important;
+}
+
+/* The connect drawer is a real sequence, so it is numbered. */
+.k-flow {
+  list-style: none;
+  counter-reset: kflow;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 26px;
+}
+
+.k-flow > li:not(.k-flow-actions):not(.ant-alert) {
+  counter-increment: kflow;
+  position: relative;
+  padding-left: 40px;
+}
+
+.k-flow > li:not(.k-flow-actions):not(.ant-alert)::before {
+  content: counter(kflow);
+  position: absolute;
+  left: 0;
+  top: -2px;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: var(--k-ink);
+  color: var(--k-on-ink);
+  display: grid;
+  place-items: center;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.k-flow-title {
+  font-size: 15px;
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+
+.k-flow-actions {
+  padding-left: 40px;
+}
+
+.k-done {
+  text-align: center;
+  padding: 32px 8px;
+}
+
+.k-done-mark {
+  width: 56px;
+  height: 56px;
+  margin: 0 auto 16px;
+  border-radius: 50%;
+  background: var(--k-good-soft);
+  color: var(--k-good);
+  display: grid;
+  place-items: center;
+  font-size: 26px;
+  font-weight: 700;
+}
+
+.k-done h3 {
+  font-size: 18px;
+  margin: 0 0 8px;
+}
+
+.k-done p {
+  max-width: 40ch;
+  margin: 0 auto 20px;
+  line-height: 1.5;
+}
+
+/* ---------- Happ preview ---------- */
+.k-happ {
+  border-radius: 20px;
+  overflow: hidden;
+  background: #101318;
+  color: #f1f3f6;
+  border: 1px solid #1f242c;
+  font-size: 14px;
+}
+
+.k-happ-head {
+  padding: 18px 18px 14px;
+  border-bottom: 1px solid #1f242c;
+}
+
+.k-happ-title {
+  font-size: 17px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+
+.k-happ-meta {
+  margin-top: 3px;
+  font-size: 12.5px;
+  color: #8e95a3;
+}
+
+.k-happ-announce {
+  margin-top: 10px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: #1a1f27;
+  font-size: 12.5px;
+  color: #b9bfcb;
+  line-height: 1.4;
+}
+
+.k-happ-list {
+  list-style: none;
+  margin: 0;
+  padding: 6px 0;
+}
+
+.k-happ-row {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  padding: 10px 18px;
+}
+
+.k-happ-row.is-active {
+  background: #1a1f27;
+}
+
+.k-happ-radio {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 1.5px solid #4b5160;
+}
+
+.k-happ-row.is-active .k-happ-radio {
+  border: 5px solid #4f8cff;
+}
+
+.k-happ-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.k-happ-ping {
+  font-size: 12px;
+  color: #5fcf8e;
+  font-variant-numeric: tabular-nums;
+}
+
+.k-happ-empty {
+  padding: 18px;
+  color: #8e95a3;
+  font-size: 13px;
+}
+
+.k-happ-foot {
+  padding: 12px 18px 16px;
+  border-top: 1px solid #1f242c;
+  font-size: 12px;
+  color: #8e95a3;
+  line-height: 1.45;
+}

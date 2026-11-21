@@ -27,6 +27,8 @@ export interface KorovaSettings {
   expiredText: string;
   happEnabled: boolean;
   incyEnabled: boolean;
+  autoSelect: boolean;
+  manageSubLook: boolean;
 }
 
 export interface DayPoint {
@@ -250,6 +252,9 @@ export interface ConnectNodeResult {
   reachable: boolean;
   probeError: string;
   needConfirm: boolean;
+  published: boolean;
+  serverName: string;
+  publishError: string;
 }
 
 export const useNodeInstallCommand = () =>
@@ -258,3 +263,98 @@ export const useNodeInstallCommand = () =>
     queryFn: async () => (await getObj<{ command: string }>('/nodes/install-command')).command,
     staleTime: Infinity,
   });
+
+export type Transport = 'tcp' | 'xhttp' | 'grpc';
+
+export interface InboundLook {
+  transport?: Transport;
+  sni?: string;
+  port?: number;
+}
+
+export interface ServerRow {
+  id: number;
+  nodeId: number;
+  name: string;
+  country: string;
+  transport: Transport;
+  sni: string;
+  inboundId: number;
+  inSub: boolean;
+  viaServerId: number;
+  keepDirect: boolean;
+  entryInboundId: number;
+  cascadeId: number;
+  configured: boolean;
+  flag: string;
+  address: string;
+  status: string;
+  latencyMs: number;
+  tunnel: boolean;
+  port: number;
+  entryPort: number;
+  viaName: string;
+  cascadeError: string;
+}
+
+export interface ServerPatch {
+  name?: string;
+  country?: string;
+  transport?: Transport;
+  sni?: string;
+  port?: number;
+  inSub?: boolean;
+  viaServerId?: number;
+  keepDirect?: boolean;
+}
+
+export const useServers = () =>
+  useQuery({
+    queryKey: ['korova', 'servers'],
+    queryFn: async () => (await getObj<ServerRow[] | null>('/servers')) ?? [],
+    refetchInterval: 15000,
+  });
+
+export const COUNTRIES: { code: string; name: string }[] = [
+  { code: 'RU', name: 'Россия' },
+  { code: 'DE', name: 'Германия' },
+  { code: 'NL', name: 'Нидерланды' },
+  { code: 'FI', name: 'Финляндия' },
+  { code: 'SE', name: 'Швеция' },
+  { code: 'FR', name: 'Франция' },
+  { code: 'GB', name: 'Великобритания' },
+  { code: 'PL', name: 'Польша' },
+  { code: 'LV', name: 'Латвия' },
+  { code: 'EE', name: 'Эстония' },
+  { code: 'LT', name: 'Литва' },
+  { code: 'CH', name: 'Швейцария' },
+  { code: 'AT', name: 'Австрия' },
+  { code: 'TR', name: 'Турция' },
+  { code: 'KZ', name: 'Казахстан' },
+  { code: 'AE', name: 'ОАЭ' },
+  { code: 'US', name: 'США' },
+  { code: 'JP', name: 'Япония' },
+  { code: 'SG', name: 'Сингапур' },
+];
+
+export function flagOf(code?: string): string {
+  const c = (code || '').toUpperCase();
+  if (!/^[A-Z]{2}$/.test(c)) return '';
+  return String.fromCodePoint(...[...c].map((ch) => 0x1f1e6 + ch.charCodeAt(0) - 65));
+}
+
+export const TRANSPORTS: { value: Transport; title: string; text: string }[] = [
+  { value: 'tcp', title: 'TCP + Vision', text: 'Самый быстрый. Для зарубежных серверов, пока у пользователей всё работает.' },
+  { value: 'xhttp', title: 'XHTTP', text: 'Лучше проходит блокировки в России. Рекомендуем для российского сервера-входа.' },
+  { value: 'grpc', title: 'gRPC', text: 'Запасной вариант, если первые два у кого-то не работают.' },
+];
+
+export const SNI_SUGGESTIONS = [
+  'www.microsoft.com',
+  'www.apple.com',
+  'dl.google.com',
+  'www.yahoo.com',
+  'ya.ru',
+  'vk.com',
+  'www.ozon.ru',
+];

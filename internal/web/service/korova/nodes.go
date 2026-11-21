@@ -26,6 +26,8 @@ type nodeKey struct {
 	Base    string `json:"b"`
 	Token   string `json:"t"`
 	Pin     string `json:"f"`
+	// Public is set for tunnelled nodes: Address is then 127.0.0.1 on this panel.
+	Public string `json:"pa"`
 }
 
 func decodeNodeKey(raw string) (*nodeKey, error) {
@@ -73,9 +75,12 @@ func uniqueNodeName(want string) string {
 }
 
 type ConnectNodeRequest struct {
-	Key   string `json:"key"`
-	Name  string `json:"name"`
-	Force bool   `json:"force"`
+	Key     string      `json:"key"`
+	Name    string      `json:"name"`
+	Force   bool        `json:"force"`
+	Publish bool        `json:"publish"`
+	Country string      `json:"country"`
+	Look    InboundLook `json:"look"`
 }
 
 type ConnectNodeResult struct {
@@ -85,6 +90,9 @@ type ConnectNodeResult struct {
 	Reachable   bool   `json:"reachable"`
 	ProbeError  string `json:"probeError"`
 	NeedConfirm bool   `json:"needConfirm"`
+	Published   bool   `json:"published"`
+	ServerName  string `json:"serverName"`
+	PublishErr  string `json:"publishError"`
 }
 
 // ConnectNode adds a node from its one-line key. An unreachable node is only
@@ -94,10 +102,19 @@ func (s *Service) ConnectNode(req ConnectNodeRequest) (*ConnectNodeResult, error
 	if err != nil {
 		return nil, err
 	}
-	var exists int64
-	database.GetDB().Model(&model.Node{}).Where("address = ? AND port = ?", k.Address, k.Port).Count(&exists)
-	if exists > 0 {
-		return nil, fmt.Errorf("узел %s:%d уже подключён — он есть в списке «Узлы»", k.Address, k.Port)
+	tunnel := k.Public != ""
+	// The certificate pin identifies a node across address changes (direct -> tunnel).
+	var existing model.Node
+	found := false
+	if k.Pin != "" {
+		found = database.GetDB().Where("pinned_cert_sha256 = ?", k.Pin).First(&existing).Error == nil
+	}
+	if !found {
+		var exists int64
+		database.GetDB().Model(&model.Node{}).Where("address = ? AND port = ?", k.Address, k.Port).Count(&exists)
+		if exists > 0 {
+			return nil, fmt.Errorf("узел %s:%d уже подключён — он есть в списке «Узлы»", k.Address, k.Port)
+		}
 	}
 
 	name := req.Name
@@ -105,8 +122,12 @@ func (s *Service) ConnectNode(req ConnectNodeRequest) (*ConnectNodeResult, error
 		name = k.Name
 	}
 	token := k.Token
+	nodeName := uniqueNodeName(name)
+	if found {
+		nodeName = existing.Name
+	}
 	nodeReq := &service.NodeMutationRequest{
-		Name:             uniqueNodeName(name),
+		Name:             nodeName,
 		Remark:           "Подключён ключом Korova",
 		Scheme:           "https",
 		Address:          k.Address,
@@ -117,13 +138,19 @@ func (s *Service) ConnectNode(req ConnectNodeRequest) (*ConnectNodeResult, error
 		TlsVerifyMode:    "pin",
 		PinnedCertSha256: k.Pin,
 		InboundSyncMode:  "all",
+		// Tunnelled nodes live on loopback here; the panel must be allowed to dial it.
+		AllowPrivateAddress: tunnel,
 	}
 	if k.Pin == "" {
 		nodeReq.TlsVerifyMode = "skip"
 	}
 
 	var ns service.NodeService
-	res := &ConnectNodeResult{Name: nodeReq.Name, Address: k.Address}
+	shown := k.Address
+	if tunnel {
+		shown = k.Public + " (через туннель)"
+	}
+	res := &ConnectNodeResult{Name: nodeReq.Name, Address: shown}
 	probeNode, err := ns.RuntimeNodeFromRequest(0, nodeReq)
 	if err != nil {
 		return nil, err
@@ -141,19 +168,42 @@ func (s *Service) ConnectNode(req ConnectNodeRequest) (*ConnectNodeResult, error
 		}
 	}
 
-	view, err := ns.CreateFromRequest(nodeReq)
-	if err != nil {
-		return nil, err
+	if found {
+		if err := ns.UpdateFromRequest(existing.Id, nodeReq); err != nil {
+			return nil, err
+		}
+		res.Id = existing.Id
+	} else {
+		view, err := ns.CreateFromRequest(nodeReq)
+		if err != nil {
+			return nil, err
+		}
+		res.Id = view.Id
 	}
-	res.Id = view.Id
+	if err := database.GetDB().Model(&model.Node{}).Where("id = ?", res.Id).
+		Update("public_address", k.Public).Error; err != nil {
+		return res, err
+	}
+	if req.Publish {
+		srv, pErr := s.PublishServer(PublishRequest{NodeID: res.Id, Name: req.Name, Country: req.Country, Look: req.Look})
+		if pErr != nil {
+			res.PublishErr = pErr.Error()
+		} else {
+			res.Published = true
+			res.ServerName = displayName(srv)
+		}
+	}
 	return res, nil
 }
 
-// NodeInstallCommand is the one-liner shown in the panel; install.sh stores the repo.
+// buildRepo is stamped by the GitHub build (-ldflags -X) with the repository it was built from.
+var buildRepo = "nyartny-ops/korova"
+
+// NodeInstallCommand is the one-liner shown in the panel.
 func NodeInstallCommand() string {
 	repo := strings.TrimSpace(os.Getenv("KOROVA_REPO"))
 	if repo == "" {
-		return ""
+		repo = buildRepo
 	}
 	return fmt.Sprintf("bash <(curl -fsSL https://github.com/%s/releases/download/korova-latest/korova.sh) install node", repo)
 }

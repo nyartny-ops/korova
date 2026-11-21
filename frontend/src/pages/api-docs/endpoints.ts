@@ -2985,6 +2985,25 @@ export const sections: readonly Section[] = [
       },
       {
         method: 'GET',
+        path: '/panel/api/korova/servers',
+        summary: 'VPN servers: nodes and the main server with their subscription state and route.',
+      },
+      {
+        method: 'POST',
+        path: '/panel/api/korova/servers/publish',
+        summary: 'Create the server inbound if needed and add it to every subscription.',
+      },
+      {
+        method: 'POST',
+        path: '/panel/api/korova/servers/:id',
+        summary: 'Change a server: name, country, transport, SNI, port, visibility or route.',
+      },
+      {
+        method: 'POST',
+        path: '/panel/api/korova/servers/:id/del',
+        summary: 'Remove a server from Korova; the node stays.',
+      },      {
+        method: 'GET',
         path: '/panel/api/korova/nodes/install-command',
         summary: 'The node install one-liner for this deployment.',
       },      {

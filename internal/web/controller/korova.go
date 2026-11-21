@@ -41,6 +41,10 @@ func NewKorovaController(g *gin.RouterGroup) *KorovaController {
 	g.POST("/cascades", a.createCascade)
 	g.POST("/cascades/:id/del", a.deleteCascade)
 	g.POST("/nodes/connect", a.connectNode)
+	g.GET("/servers", a.servers)
+	g.POST("/servers/publish", a.publishServer)
+	g.POST("/servers/:id", a.updateServer)
+	g.POST("/servers/:id/del", a.removeServer)
 	g.GET("/nodes/install-command", a.nodeInstallCommand)
 	return a
 }
@@ -230,4 +234,33 @@ func (a *KorovaController) connectNode(c *gin.Context) {
 
 func (a *KorovaController) nodeInstallCommand(c *gin.Context) {
 	korovaReply(c, "", gin.H{"command": korova.NodeInstallCommand()}, nil)
+}
+
+func (a *KorovaController) servers(c *gin.Context) {
+	out, err := a.svc.Servers()
+	korovaReply(c, "", out, err)
+}
+
+func (a *KorovaController) publishServer(c *gin.Context) {
+	var req korova.PublishRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		korovaReply(c, "", nil, err)
+		return
+	}
+	srv, err := a.svc.PublishServer(req)
+	korovaReply(c, "Сервер добавлен в подписку", srv, err)
+}
+
+func (a *KorovaController) updateServer(c *gin.Context) {
+	var p korova.ServerPatch
+	if err := c.ShouldBindJSON(&p); err != nil {
+		korovaReply(c, "", nil, err)
+		return
+	}
+	srv, err := a.svc.UpdateServer(idParam(c), p)
+	korovaReply(c, "Сохранено", srv, err)
+}
+
+func (a *KorovaController) removeServer(c *gin.Context) {
+	korovaReply(c, "Сервер убран из Korova", nil, a.svc.RemoveServer(idParam(c)))
 }

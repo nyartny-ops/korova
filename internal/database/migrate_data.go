@@ -68,6 +68,7 @@ func migrationModels() []any {
 		&model.KorovaPayment{},
 		&model.KorovaSetting{},
 		&model.KorovaCascade{},
+		&model.KorovaServer{},
 	}
 }
 

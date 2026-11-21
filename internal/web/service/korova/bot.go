@@ -95,6 +95,7 @@ func RestartBot(svc *Service) {
 		}
 	}()
 	logger.Infof("korova bot @%s started", me.Username)
+	go svc.ApplySubscriptionLook()
 }
 
 // notify is fire-and-forget: a user who blocked the bot must not break callers.

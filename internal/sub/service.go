@@ -1872,6 +1872,9 @@ func (s *SubService) resolveInboundAddress(inbound *model.Inbound) string {
 	if inbound.NodeID != nil && s.nodesByID != nil {
 		if n, ok := s.nodesByID[*inbound.NodeID]; ok {
 			nodeAddr = n.Address
+			if n.PublicAddress != "" {
+				nodeAddr = n.PublicAddress
+			}
 		}
 	}
 	var listenAddr string

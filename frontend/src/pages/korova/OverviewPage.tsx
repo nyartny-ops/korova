@@ -31,7 +31,7 @@ const fmt = (n: number) => n.toLocaleString('ru-RU');
 function Setup({ o }: { o: Overview }) {
   const navigate = useNavigate();
   const steps = [
-    { done: o.serversReady, title: 'Выбери серверы', text: 'Какие подключения получат подписчики', to: '/korova/bot' },
+    { done: o.serversReady, title: 'Подключи сервер', text: 'Поставь Korova на VPS и вставь ключ', to: '/korova/servers' },
     { done: o.subBaseReady, title: 'Адрес подписки', text: 'Ссылка, которую вставляют в Happ', to: '/korova/bot' },
     { done: o.botRunning, title: 'Запусти бота', text: o.botError || 'Вставь токен от @BotFather', to: '/korova/bot' },
     { done: o.plansReady, title: 'Проверь тарифы', text: 'Цены в звёздах и устройства', to: '/korova/plans' },

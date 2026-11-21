@@ -4,6 +4,7 @@
 #   korova install node     # extra server for VPN traffic
 #   korova update           # download the latest build and restart
 #   korova token            # new one-line key to connect this node
+#   korova tunnel 1.2.3.4   # node behind a firewall: connect through the main server
 #   korova info             # panel address and login
 set -euo pipefail
 trap 'rc=$?; [ $rc -ne 0 ] && printf "\n\033[31m✗ Остановилось на строке %s (код %s). Пришли этот вывод.\033[0m\n" "$LINENO" "$rc" >&2' EXIT
@@ -77,7 +78,10 @@ install_files() {
   systemctl daemon-reload
   systemctl enable x-ui >/dev/null 2>&1
   # Keep this script as the `korova` command for updates.
-  curl -fsSL "$RELEASE/korova.sh" -o /usr/local/bin/korova 2>/dev/null && chmod +x /usr/local/bin/korova || true
+  # Replace via rename: bash is still reading the running copy of this very file.
+  if curl -fsSL "$RELEASE/korova.sh" -o /usr/local/bin/korova.new 2>/dev/null; then
+    chmod +x /usr/local/bin/korova.new && mv -f /usr/local/bin/korova.new /usr/local/bin/korova
+  fi
   rm -rf "$TMP"
   ok "Панель в $APP, база в $DB"
 }
@@ -189,6 +193,7 @@ start() {
 
 # One line for the main panel: address, port, path, API key and certificate pin.
 node_key() {
+  local over_addr="${1:-}" over_port="${2:-}" public="${3:-}"
   local line tok port fp ip name base json
   line=$(xui setting -getApiToken -tokenName korova-master -tokenScope node-admin 2>/dev/null | grep apiToken || true)
   tok=$(echo "${line#*apiToken:}" | tr -d '[:space:]')
@@ -198,8 +203,69 @@ node_key() {
   fp=$(openssl x509 -in /root/cert/node.crt -noout -fingerprint -sha256 2>/dev/null | cut -d= -f2 | tr -d ':')
   ip=$(curl -fsS4 --max-time 5 https://ifconfig.me 2>/dev/null || hostname -I | awk '{print $1}')
   name=$(hostname -s | tr -cd 'A-Za-z0-9-' | cut -c1-24)
-  json=$(printf '{"v":1,"n":"%s","a":"%s","p":%s,"b":"%s","t":"%s","f":"%s"}' "${name:-node}" "$ip" "${port:-2053}" "${base:-/}" "$tok" "$fp")
+  [ -n "$over_addr" ] && ip=$over_addr
+  [ -n "$over_port" ] && port=$over_port
+  json=$(printf '{"v":1,"n":"%s","a":"%s","p":%s,"b":"%s","t":"%s","f":"%s","pa":"%s"}' "${name:-node}" "$ip" "${port:-2053}" "${base:-/}" "$tok" "$fp" "$public")
   printf 'korova-node:%s' "$(printf '%s' "$json" | base64 | tr -d '\n')"
+}
+
+# Reverse tunnel for nodes the main server cannot reach (e.g. RU hosting that
+# drops inbound foreign traffic): the node dials out and exposes its panel on
+# the main server's loopback only.
+tunnel() {
+  [ -f "$CREDS" ] || die "Сначала установи узел: korova install node"
+  local master="${1:-}" key=/root/.ssh/korova_tunnel tag port panel_port public
+  [ -n "$master" ] || read -rp "  IP основного сервера: " master
+  [ -n "$master" ] || die "Нужен IP основного сервера"
+  command -v ssh >/dev/null || apt-get install -y -qq openssh-client >/dev/null
+  mkdir -p /root/.ssh && chmod 700 /root/.ssh
+  tag="korova-tunnel@$(hostname -s | tr -cd 'A-Za-z0-9-')"
+  [ -f "$key" ] || ssh-keygen -q -t ed25519 -N '' -C "$tag" -f "$key"
+  port=$(getenv KOROVA_TUNNEL_PORT)
+  if [ -z "$port" ]; then port=$((20000 + RANDOM % 10000)); setenv KOROVA_TUNNEL_PORT "$port"; fi
+  panel_port=$(xui setting -show true 2>/dev/null | awk '$1=="port:" {print $2; exit}')
+  panel_port=${panel_port:-2053}
+  public=$(curl -fsS4 --max-time 5 https://ifconfig.me 2>/dev/null || hostname -I | awk '{print $1}')
+
+  say "Разрешаю туннель на основном сервере $master"
+  echo "  Сейчас спросит root-пароль основного сервера — один раз."
+  # The key may only open 127.0.0.1:$port there: no shell, no other forwards.
+  printf 'restrict,port-forwarding,permitlisten="127.0.0.1:%s",command="/bin/false" %s\n' "$port" "$(cat "$key.pub")" \
+    | ssh -o StrictHostKeyChecking=accept-new root@"$master" \
+      "mkdir -p ~/.ssh && chmod 700 ~/.ssh && f=~/.ssh/authorized_keys && touch \$f && grep -v '$tag' \$f > \$f.korova || true; cat >> \$f.korova && mv \$f.korova \$f && chmod 600 \$f" \
+    || die "Не удалось зайти на $master. Проверь IP и root-пароль."
+  ok "Ключ туннеля добавлен"
+
+  cat > /etc/systemd/system/korova-tunnel.service <<UNIT
+[Unit]
+Description=Korova reverse tunnel to the main panel
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+ExecStart=/usr/bin/ssh -NT -i $key -o BatchMode=yes -o ExitOnForwardFailure=yes -o ServerAliveInterval=20 -o ServerAliveCountMax=3 -o StrictHostKeyChecking=accept-new -R 127.0.0.1:$port:127.0.0.1:$panel_port root@$master
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+  systemctl daemon-reload
+  systemctl enable korova-tunnel >/dev/null 2>&1
+  systemctl restart korova-tunnel
+  sleep 4
+  systemctl is-active --quiet korova-tunnel || { journalctl -u korova-tunnel -n 20 --no-pager; die "Туннель не поднялся, лог выше."; }
+  ok "Туннель работает и сам переподключается после обрывов"
+
+  local k
+  k=$(node_key 127.0.0.1 "$port" "$public")
+  [ -n "$k" ] || die "Не удалось выпустить ключ"
+  say "Ключ узла через туннель"
+  echo "  Вставь в основной панели: Серверы и каскады → Подключить сервер."
+  echo "  Если этот узел там уже есть, он обновится, а не задвоится."
+  echo
+  printf '\033[1m%s\033[0m\n' "$k"
+  echo
 }
 
 info() {
@@ -244,7 +310,7 @@ case "$CMD" in
     first_credentials
     start
     tok=""
-    if [ "$ROLE" = node ] && [ "$fresh" = 1 ]; then tok=$(node_key); fi
+    if [ "$ROLE" = node ]; then tok=$(node_key); fi
     info "$tok"
     ;;
   update)
@@ -259,7 +325,11 @@ case "$CMD" in
     ;;
   token)
     [ -f "$CREDS" ] || die "Korova ещё не установлена."
-    tok=$(node_key)
+    if [ -n "$(getenv KOROVA_TUNNEL_PORT)" ] && systemctl is-active --quiet korova-tunnel 2>/dev/null; then
+      tok=$(node_key 127.0.0.1 "$(getenv KOROVA_TUNNEL_PORT)" "$(curl -fsS4 --max-time 5 https://ifconfig.me 2>/dev/null)")
+    else
+      tok=$(node_key)
+    fi
     [ -n "$tok" ] || die "Не удалось выпустить ключ"
     say "Новый ключ узла (старый больше не работает)"
     echo
@@ -270,7 +340,10 @@ case "$CMD" in
   info)
     info
     ;;
+  tunnel)
+    tunnel "${2:-}"
+    ;;
   *)
-    die "Команды: install [master|node], update, token, info"
+    die "Команды: install [master|node], update, token, tunnel IP_ОСНОВНОГО, info"
     ;;
 esac

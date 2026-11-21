@@ -94,6 +94,7 @@ func allModels() []any {
 		&model.KorovaPayment{},
 		&model.KorovaSetting{},
 		&model.KorovaCascade{},
+		&model.KorovaServer{},
 	}
 }
 

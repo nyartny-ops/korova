@@ -2067,3 +2067,8 @@ func (s *SettingService) SetValue(key, value string) error {
 	}
 	return s.setString(key, value)
 }
+
+// GetValue reads one known setting key; Korova compares before rewriting subscription metadata.
+func (s *SettingService) GetValue(key string) (string, error) {
+	return s.getString(key)
+}

@@ -32,6 +32,8 @@ type Settings struct {
 	ExpiredText    string  `json:"expiredText"`
 	HappEnabled    bool    `json:"happEnabled"`
 	IncyEnabled    bool    `json:"incyEnabled"`
+	AutoSelect     bool    `json:"autoSelect"`
+	ManageSubLook  bool    `json:"manageSubLook"`
 }
 
 func defaultSettings() Settings {
@@ -48,6 +50,7 @@ func defaultSettings() Settings {
 		ExpiredText:    "Подписка закончилась. Продли её в боте, и серверы вернутся автоматически.",
 		HappEnabled:    true,
 		IncyEnabled:    true,
+		ManageSubLook:  true,
 	}
 }
 

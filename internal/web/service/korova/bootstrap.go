@@ -20,6 +20,7 @@ func Bootstrap(svc *Service) {
 	}
 	applyEnv(svc)
 	RestartBot(svc)
+	svc.ApplySubscriptionLook()
 }
 
 func seedFirstRun(svc *Service) {

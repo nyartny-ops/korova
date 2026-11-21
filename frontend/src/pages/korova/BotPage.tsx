@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import { Alert, Button, Checkbox, Input, InputNumber, Modal, Radio, Select, Skeleton, Switch } from 'antd';
+import { Alert, Button, Checkbox, Collapse, Input, InputNumber, Modal, Radio, Select, Skeleton, Switch } from 'antd';
+import { useNavigate } from 'react-router';
 
 import KorovaPage, { Row, Section, Status } from '@/components/korova/KorovaPage';
 import { TgWelcome } from '@/components/korova/TgPreview';
@@ -23,6 +24,7 @@ function groupByServer(list: InboundOption[]) {
 }
 
 export default function BotPage() {
+  const navigate = useNavigate();
   const { data: remote, isLoading } = useKorovaSettings();
   const { data: inbounds = [] } = useInboundOptions();
   const { data: overview } = useOverview();
@@ -141,11 +143,22 @@ export default function BotPage() {
           </Section>
 
           <Section
-            title="Серверы для подписчиков"
-            sub="Каждый подписчик получит свой ключ на всех отмеченных подключениях."
+            title="Подписка"
+            sub="Каждый подписчик получает одну ссылку и свой ключ на каждом сервере."
             flush
           >
-            <Row label="Подключения" hint="Отметил новый сервер — ключи у всех подписчиков создадутся сами.">
+            <Row label="Серверы" hint="Добавляй и убирай серверы на странице «Серверы» — подписка обновится сама.">
+              <Button onClick={() => navigate('/korova/servers')}>Открыть «Серверы»</Button>
+              <Collapse
+                ghost
+                size="small"
+                style={{ marginTop: 8, marginLeft: -16 }}
+                items={[
+                  {
+                    key: 'manual',
+                    label: `Вручную: отмечено подключений — ${s.inboundIds.length}`,
+                    children: (
+                      <div>
               {inbounds.length === 0 ? (
                 <Alert
                   type="info"
@@ -175,6 +188,20 @@ export default function BotPage() {
                   </div>
                 ))
               )}
+                      </div>
+                    ),
+                  },
+                ]}
+              />
+            </Row>
+            <Row
+              label="Оформление в Happ и Incy"
+              hint="Название подписки, кнопка «Поддержка», объявление и сообщение об окончании подписки берутся из бота."
+            >
+              <label style={{ display: 'inline-flex', gap: 10, alignItems: 'center', cursor: 'pointer' }}>
+                <Switch checked={s.manageSubLook} onChange={(v) => set('manageSubLook', v)} />
+                Оформлять автоматически
+              </label>
             </Row>
             <Row
               label="Адрес подписки"

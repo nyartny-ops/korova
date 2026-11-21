@@ -32,7 +32,7 @@ const KorovaOverviewPage = lazy(() => import('@/pages/korova/OverviewPage'));
 const KorovaSubscribersPage = lazy(() => import('@/pages/korova/SubscribersPage'));
 const KorovaPlansPage = lazy(() => import('@/pages/korova/PlansPage'));
 const KorovaBotPage = lazy(() => import('@/pages/korova/BotPage'));
-const KorovaCascadesPage = lazy(() => import('@/pages/korova/CascadesPage'));
+const KorovaServersPage = lazy(() => import('@/pages/korova/ServersPage'));
 
 export interface PanelRoute {
   path: string;
@@ -48,7 +48,7 @@ export const PANEL_ROUTES: PanelRoute[] = [
   { path: '/korova/subscribers', titleKey: 'menu.korovaSubscribers', icon: UserOutlined, component: KorovaSubscribersPage },
   { path: '/korova/plans', titleKey: 'menu.korovaPlans', icon: GiftOutlined, component: KorovaPlansPage },
   { path: '/korova/bot', titleKey: 'menu.korovaBot', icon: RobotOutlined, component: KorovaBotPage },
-  { path: '/korova/servers', titleKey: 'menu.korovaServers', icon: ApartmentOutlined, component: KorovaCascadesPage },
+  { path: '/korova/servers', titleKey: 'menu.korovaServers', icon: ApartmentOutlined, component: KorovaServersPage },
   { path: '/system', titleKey: 'menu.dashboard', icon: DashboardOutlined, component: IndexPage },
   { path: '/inbounds', titleKey: 'menu.inbounds', icon: ImportOutlined, component: InboundsPage },
   { path: '/clients', titleKey: 'menu.clients', icon: TeamOutlined, component: ClientsPage },

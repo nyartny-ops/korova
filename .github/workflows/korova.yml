@@ -59,7 +59,8 @@ jobs:
           export CC=$(find "$TC/bin" -name '*-gcc.br_real' -type f -executable | head -n1)
           export CGO_ENABLED=1 GOOS=linux GOARCH=${{ matrix.platform }}
           export CGO_CFLAGS="-D_LARGEFILE64_SOURCE"
-          go build -trimpath -ldflags "-w -s -linkmode external -extldflags '-static'" -o x-ui/x-ui main.go
+          REPO_FLAG="-X github.com/mhsanaei/3x-ui/v3/internal/web/service/korova.buildRepo=${{ github.repository }}"
+          go build -trimpath -ldflags "-w -s $REPO_FLAG -linkmode external -extldflags '-static'" -o x-ui/x-ui main.go
           file x-ui/x-ui
 
       - name: Add Xray, address databases and service files

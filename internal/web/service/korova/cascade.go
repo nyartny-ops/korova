@@ -75,6 +75,9 @@ func (s *Service) CreateCascade(req CascadeRequest) (*model.KorovaCascade, error
 		node := &model.Node{}
 		if err := database.GetDB().First(node, *exit.NodeID).Error; err == nil {
 			address = node.Address
+			if node.PublicAddress != "" {
+				address = node.PublicAddress
+			}
 		}
 	}
 	if address == "" {
