@@ -296,6 +296,11 @@ func applyCascade(cfg map[string]any, c *model.KorovaCascade, outbound map[strin
 	}
 	var head []any
 	if c.DirectRu {
+		// Clients send domain names: without resolving them geoip:ru never
+		// matches, and Russian sites on .com go abroad.
+		if ds, _ := routing["domainStrategy"].(string); ds == "" || ds == "AsIs" {
+			routing["domainStrategy"] = "IPIfNonMatch"
+		}
 		direct := directTag(cfg)
 		head = append(head,
 			map[string]any{
